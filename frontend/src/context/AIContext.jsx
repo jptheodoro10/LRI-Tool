@@ -16,7 +16,12 @@ export function AIProvider({ children }) {
     });
   };
 
-  const value = useMemo(() => ({ aiEnabled, toggleAI }), [aiEnabled]);
+  const setAIEnabled = (value) => {
+    setAiEnabled(Boolean(value));
+    localStorage.setItem('aiEnabled', String(Boolean(value)));
+  };
+
+  const value = useMemo(() => ({ aiEnabled, toggleAI, setAIEnabled }), [aiEnabled]);
   return <AIContext.Provider value={value}>{children}</AIContext.Provider>;
 }
 

@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:8000';
+export const API_URL = 'http://localhost:8000';
 
 export async function api(path, method = 'GET', body, token) {
   const res = await fetch(`${API_URL}${path}`, {
@@ -12,7 +12,10 @@ export async function api(path, method = 'GET', body, token) {
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.detail || 'Request failed');
+    const err = new Error(data.detail || 'Request failed');
+    // Keep status for caller-side branching.
+    err.status = res.status;
+    throw err;
   }
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('application/json')) return res.json();

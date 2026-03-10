@@ -1,9 +1,7 @@
-from app.services.ai_service import MockAIService
+from app.services.llm_client import MockLLMClient
 
 
-def test_mock_ai_deterministic_suggestions():
-    svc = MockAIService()
-    context = {'project_id': 1, 'changed_field': 'context', 'content': 'ml security in finance'}
-    a = svc.suggest_fields(context)
-    b = svc.suggest_fields(context)
-    assert a.payload == b.payload
+def test_mock_llm_is_deterministic():
+    client = MockLLMClient()
+    prompt = 'Generate suggestions for run context: security and ml'
+    assert client.generate(prompt) == client.generate(prompt)

@@ -20,11 +20,28 @@ export default function DashboardPage({ token }) {
     setError('');
     try {
       const data = await api('/projects', 'GET', null, token);
-      setProjects(data);
+      console.log('Projects payload (/projects):', data);
+      setProjects(
+        (data || []).map((project) => ({
+          ...project,
+          created_at: project?.created_at ?? project?.createdAt ?? null,
+        }))
+      );
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDeleteProject(project) {
+    const confirmed = window.confirm(`Delete project "${project.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await api(`/projects/${project.id}`, 'DELETE', null, token);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    } catch (err) {
+      setError(err.message);
     }
   }
 
@@ -53,7 +70,9 @@ export default function DashboardPage({ token }) {
         </div>
       )}
 
-      {!loading && !error && projects.length > 0 && <ProjectList projects={projects} />}
+      {!loading && !error && projects.length > 0 && (
+        <ProjectList projects={projects} onDeleteProject={handleDeleteProject} />
+      )}
     </section>
   );
 }

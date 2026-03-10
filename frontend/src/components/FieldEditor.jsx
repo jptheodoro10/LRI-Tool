@@ -1,6 +1,6 @@
 import React from "react";
 import { useEffect, useState } from "react";
-import { getFieldPlaceholder } from "../utils/placeholder";
+import { getFieldLabel, getFieldPlaceholder } from "../utils/placeholder";
 
 export default function FieldEditor({
   field,
@@ -11,16 +11,23 @@ export default function FieldEditor({
   onAccept,
   onDismiss,
   pending,
+  readOnly,
+  labelOverride,
+  placeholderOverride,
 }) {
   const [draft, setDraft] = useState(value || "");
+  const [hasInteracted, setHasInteracted] = useState(Boolean((value || "").trim().length));
 
   useEffect(() => {
     setDraft(value || "");
+    if ((value || "").trim().length > 0) {
+      setHasInteracted(true);
+    }
   }, [value]);
 
-  const label = String(field || "")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (m) => m.toUpperCase());
+  const label = labelOverride || getFieldLabel(field);
+  const placeholder =
+    hasInteracted ? "" : (placeholderOverride ?? getFieldPlaceholder(field));
 
   return (
     <div className="field-card">
@@ -28,12 +35,20 @@ export default function FieldEditor({
       <textarea
         id={field}
         value={draft}
+        readOnly={readOnly}
         onChange={(e) => {
+          if (readOnly) return;
+          if (typeof onChange !== "function") return;
+          setHasInteracted(true);
           setDraft(e.target.value);
           onChange(field, e.target.value);
         }}
-        onBlur={() => onChange(field, draft, true)}
-        placeholder={getFieldPlaceholder(field)}
+        onBlur={() => {
+          if (readOnly) return;
+          if (typeof onChange !== "function") return;
+          onChange(field, draft, true);
+        }}
+        placeholder={placeholder}
       />
       {onConfirm && (
         <div className="confirm-row">
@@ -43,7 +58,7 @@ export default function FieldEditor({
         </div>
       )}
       {pending && <p className="hint">Suggestion pending...</p>}
-      {suggestion && (
+      {!readOnly && suggestion && (
         <div className="suggestion-inline suggestion-inline-ai">
           <p>{suggestion.suggested_text}</p>
           <div className="row gap-8">

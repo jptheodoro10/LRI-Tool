@@ -1,105 +1,139 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from datetime import datetime
 import hashlib
-from typing import Any
+import json
 
-from app.core.config import settings
+from sqlalchemy.orm import Session
 
-
-@dataclass
-class AIResult:
-    payload: dict[str, Any]
-    fallback_used: bool = False
-
-
-class AIService:
-    def suggest_fields(self, context: dict[str, Any]) -> AIResult:
-        raise NotImplementedError
-
-    def summarize_workshop(self, context: dict[str, Any]) -> AIResult:
-        raise NotImplementedError
+from app.db.session import SessionLocal
+from app.models import AISuggestionStatus
+from app.repositories import AISuggestionRepository, CanvasRepository, RunRepository
+from app.services.llm_client import get_llm_client
 
 
-class MockAIService(AIService):
-    keyword_map = {
-        'security': ('implications', 'Potential compliance and security impact in production systems.'),
-        'ml': ('evidence', 'Existing ML maintenance pain points suggest measurable operational impact.'),
-        'finance': ('stakeholders', 'Consider compliance officers, risk analysts, and legal teams.'),
-    }
+class AISuggestionService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.run_repo = RunRepository(db)
+        self.canvas_repo = CanvasRepository(db)
+        self.ai_repo = AISuggestionRepository(db)
+        self.llm_client = get_llm_client()
 
-    def suggest_fields(self, context: dict[str, Any]) -> AIResult:
-        field = context.get('changed_field', '')
-        content = (context.get('content') or '').lower()
-        project_id = str(context.get('project_id', '0'))
-        stable_score = int(hashlib.sha256((project_id + field + content).encode()).hexdigest()[:2], 16) % 3 + 5
+    def _response_cycle_for_run(self, run) -> int:
+        if run.current_phase == 2 and run.current_cycle > 1:
+            return max(1, run.current_cycle - 1)
+        return run.current_cycle
 
-        target_field = 'objective'
-        suggested = 'Define a measurable objective with timeline and expected industry impact.'
-        rationale = 'General LRI heuristic for strengthening problem framing.'
-
-        for kw, value in self.keyword_map.items():
-            if kw in content:
-                target_field, suggested = value
-                rationale = f'Detected keyword "{kw}" in source field.'
-                break
-
-        return AIResult(
-            payload={
-                'suggestions': [
-                    {
-                        'target_field': target_field,
-                        'source_field': field,
-                        'suggested_text': suggested,
-                        'confidence': stable_score,
-                        'rationale': rationale,
-                    }
-                ]
+    def compute_context_hash(self, run_id: int, cycle: int) -> str:
+        responses = self.canvas_repo.list_responses_by_run(run_id, cycle=cycle)
+        questions_by_id = {q.id: q.key for q in self.canvas_repo.list_questions()}
+        payload = [
+            {
+                'question_key': questions_by_id.get(r.question_id, str(r.question_id)),
+                'content': r.content,
+                'participant_id': r.participant_id,
             }
-        )
-
-    def summarize_workshop(self, context: dict[str, Any]) -> AIResult:
-        title = context.get('project_title', 'Untitled Project')
-        decision = context.get('decision', 'undecided')
-        highlights = context.get('highlights', [])
-        summary = [
-            f'Project: {title}',
-            'Summary of LRI workshop outcomes:',
-            '- Problem and context were collaboratively refined.',
-            '- Evidence and stakeholder framing were consolidated.',
-            f'- Final decision: {decision}.',
+            for r in responses
         ]
-        for item in highlights[:5]:
-            summary.append(f'- {item}')
-        return AIResult(payload={'summary_text': '\n'.join(summary), 'highlights': highlights[:5]})
+        payload.sort(key=lambda item: item['question_key'])
+        serialized = json.dumps(payload, sort_keys=True)
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+    def refresh_suggestions_for_run(self, run_id: int) -> None:
+        run = self.run_repo.get(run_id)
+        if run is None or not run.ai_mode_enabled:
+            return
+        if run.current_phase != 1:
+            return
+
+        cycle = self._response_cycle_for_run(run)
+        context_hash = self.compute_context_hash(run_id, cycle=cycle)
+        unanswered_questions = self.canvas_repo.list_unanswered_questions(run_id, cycle=cycle)
+        responses = self.canvas_repo.list_responses_by_run(run_id, cycle=cycle)
+        question_map = {q.id: q.key for q in self.canvas_repo.list_questions()}
+
+        context_lines = []
+        for response in responses:
+            key = question_map.get(response.question_id, str(response.question_id))
+            context_lines.append(f'{key}: {response.content}')
+        context_text = '\n'.join(context_lines).strip() or 'No responses yet.'
+
+        for question in unanswered_questions:
+            existing = self.ai_repo.get(run_id=run_id, question_id=question.id, cycle=cycle)
+            if existing and existing.context_hash == context_hash and existing.status == AISuggestionStatus.SUCCEEDED:
+                continue
+
+            if existing and existing.context_hash != context_hash and existing.status in {
+                AISuggestionStatus.QUEUED,
+                AISuggestionStatus.RUNNING,
+            }:
+                self.ai_repo.upsert(
+                    run_id=run_id,
+                    question_id=question.id,
+                    cycle=cycle,
+                    status=AISuggestionStatus.STALE,
+                    context_hash=existing.context_hash,
+                    output=existing.output,
+                    error_message=existing.error_message,
+                )
+
+            self.ai_repo.upsert(
+                run_id=run_id,
+                question_id=question.id,
+                cycle=cycle,
+                status=AISuggestionStatus.QUEUED,
+                context_hash=context_hash,
+                output=None,
+                error_message=None,
+            )
+            self.ai_repo.upsert(
+                run_id=run_id,
+                question_id=question.id,
+                cycle=cycle,
+                status=AISuggestionStatus.RUNNING,
+                context_hash=context_hash,
+                output=None,
+                error_message=None,
+            )
+
+            prompt = (
+                'You are assisting a Lean Research Inception workshop. '
+                f'Generate a concise suggestion for the unanswered canvas "{question.key}".\n\n'
+                f'Current run context:\n{context_text}'
+            )
+
+            try:
+                suggestion_text = self.llm_client.generate(prompt)
+                self.ai_repo.upsert(
+                    run_id=run_id,
+                    question_id=question.id,
+                    cycle=cycle,
+                    status=AISuggestionStatus.SUCCEEDED,
+                    context_hash=context_hash,
+                    output={'text': suggestion_text, 'question_key': question.key},
+                    error_message=None,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.ai_repo.upsert(
+                    run_id=run_id,
+                    question_id=question.id,
+                    cycle=cycle,
+                    status=AISuggestionStatus.FAILED,
+                    context_hash=context_hash,
+                    output=None,
+                    error_message=str(exc),
+                )
+
+        # Keep timestamps monotonic for consumers.
+        now = datetime.utcnow()
+        for suggestion in self.ai_repo.list_by_run(run_id, cycle=cycle):
+            suggestion.updated_at = now
+        self.db.flush()
 
 
-class LLMAIService(AIService):
-    def __init__(self, mock: MockAIService):
-        self.mock = mock
-
-    def suggest_fields(self, context: dict[str, Any]) -> AIResult:
-        # Placeholder external call. For artifact reproducibility, failover to mock.
-        if not settings.llm_api_key:
-            result = self.mock.suggest_fields(context)
-            result.fallback_used = True
-            return result
-        result = self.mock.suggest_fields(context)
-        result.fallback_used = True
-        return result
-
-    def summarize_workshop(self, context: dict[str, Any]) -> AIResult:
-        if not settings.llm_api_key:
-            result = self.mock.summarize_workshop(context)
-            result.fallback_used = True
-            return result
-        result = self.mock.summarize_workshop(context)
-        result.fallback_used = True
-        return result
-
-
-def get_ai_service() -> AIService:
-    mock = MockAIService()
-    if settings.ai_mode == 'on':
-        return LLMAIService(mock)
-    return mock
+def refresh_suggestions_background(run_id: int) -> None:
+    with SessionLocal() as db:
+        service = AISuggestionService(db)
+        service.refresh_suggestions_for_run(run_id)
+        db.commit()
