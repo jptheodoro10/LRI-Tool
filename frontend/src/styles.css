@@ -419,6 +419,11 @@ textarea {
   gap: 8px;
 }
 
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+  flex: 0 0 auto;
+}
+
 .project-layout {
   display: grid;
   grid-template-columns: 280px 1fr;

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = 'LRI Tool API'
+    frontend_public_url: str = 'http://localhost:5173'
     auth_mode: str = 'local'
     ai_mode: str = 'mock'
 

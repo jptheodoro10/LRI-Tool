@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
 
@@ -9,11 +9,45 @@ export default function InvitePage() {
   const [name, setName] = useState('');
   const [company, setCompany] = useState('');
   const [consent, setConsent] = useState(true);
+  const [checkingInvite, setCheckingInvite] = useState(true);
+  const [inviteValid, setInviteValid] = useState(false);
   const [message, setMessage] = useState('');
   const [redirectTarget, setRedirectTarget] = useState('');
 
+  useEffect(() => {
+    let cancelled = false;
+    setCheckingInvite(true);
+    setInviteValid(false);
+    setMessage('');
+
+    api(`/invites/${token}`, 'GET')
+      .then(() => {
+        if (!cancelled) {
+          setInviteValid(true);
+          setMessage('');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setInviteValid(false);
+          setMessage(err.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingInvite(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   async function join(e) {
     e.preventDefault();
+    if (!inviteValid) {
+      setMessage(message || 'Invite is not available.');
+      return;
+    }
     if (!consent) {
       setMessage('Consent is required.');
       return;
@@ -55,8 +89,8 @@ export default function InvitePage() {
             I accept consent terms
           </label>
 
-          <button type="submit" className="btn btn-primary">
-            Join Workshop
+          <button type="submit" className="btn btn-primary" disabled={checkingInvite || !inviteValid}>
+            {checkingInvite ? 'Checking invite...' : 'Join Workshop'}
           </button>
           {message && <div className="alert">{message}</div>}
           {redirectTarget && (
