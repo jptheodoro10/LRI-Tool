@@ -1,28 +1,34 @@
 import React, { useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../services/api';
 
 export default function InvitePage() {
   const { token } = useParams();
   const navigate = useNavigate();
-  const location = useLocation();
-  const query = new URLSearchParams(location.search);
 
   const [name, setName] = useState('');
   const [company, setCompany] = useState('');
-  const [consent, setConsent] = useState(false);
+  const [consent, setConsent] = useState(true);
   const [message, setMessage] = useState('');
   const [redirectTarget, setRedirectTarget] = useState('');
 
   async function join(e) {
     e.preventDefault();
+    if (!consent) {
+      setMessage('Consent is required.');
+      return;
+    }
+
     try {
-      const inspect = await api(`/invite/${token}`, 'GET');
-      const data = await api(`/invite/${token}/join`, 'POST', { name, company, consent });
+      const safeName = String(name || 'guest').toLowerCase().replace(/[^a-z0-9]+/g, '.');
+      const safeCompany = String(company || 'invite').toLowerCase().replace(/[^a-z0-9]+/g, '.');
+      const guestEmail = `${safeName}.${safeCompany}@invite.local`;
+      const data = await api(`/invites/${token}/accept`, 'POST', { email: guestEmail });
       localStorage.setItem('participant', JSON.stringify(data));
 
-      const phase = Number(query.get('phase')) || 2;
-      const target = `/projects/${inspect.project_id || data.project_id}/phase/${phase}?mode=participant&participantId=${data.participant_id}`;
+      const project = await api(`/projects/${data.project_id}?participant_id=${data.participant_id}`, 'GET', null, null);
+      const phase = Number(project.current_phase || 1);
+      const target = `/projects/${data.project_id}/phase/${phase}?mode=participant&participantId=${data.participant_id}`;
       setRedirectTarget(target);
       setMessage('Joined successfully. Redirecting to workshop...');
 

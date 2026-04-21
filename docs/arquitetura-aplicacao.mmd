@@ -1,0 +1,65 @@
+flowchart LR
+    subgraph U["Atores"]
+        R["Pesquisador / Facilitador"]
+        P["Participante Convidado"]
+    end
+
+    subgraph FE["Frontend React + Vite"]
+        APP["App / React Router"]
+        PHASE["ProjectPhasePage"]
+        APIJS["services/api.js"]
+        INV["InvitePage"]
+    end
+
+    subgraph BE["Backend FastAPI"]
+        ROUTERS["Routers
+auth / runs / canvas / invites / scores"]
+        SERVICES["Services
+RunService
+CanvasService
+AISuggestionService
+InviteService
+ScoreService
+PDFService"]
+        LLM["LLMClient
+MockLLMClient | OpenAILLMClient"]
+        REPOS["Repositories"]
+    end
+
+    subgraph DB["Persistencia"]
+        PG["PostgreSQL"]
+        EX["exports/*.pdf"]
+    end
+
+    subgraph AUX["Auxiliar"]
+        WK["Worker placeholder
+reservado para jobs futuros"]
+    end
+
+    R --> APP
+    P --> INV
+
+    APP --> PHASE
+    INV --> APIJS
+    PHASE --> APIJS
+    APIJS --> ROUTERS
+
+    ROUTERS --> SERVICES
+    SERVICES --> REPOS
+    REPOS --> PG
+    SERVICES --> LLM
+    SERVICES --> EX
+
+    LLM -->|"mock offline ou OpenAI Responses API"| SERVICES
+
+    WK -. atualmente nao executa fluxos centrais .- BE
+
+    PHASE -->|"Fase 1: 1 request por campo vazio em paralelo"| ROUTERS
+    PHASE -->|"Fase 3: 1 request por campo em paralelo"| ROUTERS
+    PHASE -->|"autosave periodico do canvas"| ROUTERS
+    PHASE -->|"advance-phase / decision / export"| ROUTERS
+
+    ROUTERS -->|"JWT bearer"| R
+    ROUTERS -->|"invite token + participant_id"| P
+
+    PG -->|"runs, participants, invites,\ncanvas_responses, ai_suggestions,\nscores, decisions, exports"| REPOS

@@ -1,0 +1,54 @@
+sequenceDiagram
+    autonumber
+    actor U as Facilitador
+    participant FE as ProjectPhasePage
+    participant API as FastAPI / canvas router
+    participant AIS as AISuggestionService
+    participant LLM as LLMClient
+    participant DB as PostgreSQL
+
+    U->>FE: Clica em "Generate recommendations" ou "Get overview"
+    FE->>API: Persiste estado atual do canvas
+    API->>DB: Upsert das respostas
+    DB-->>API: OK
+    API-->>FE: Estado persistido
+
+    par Campo 1
+        FE->>API: POST /canvas/{field1}/recommendation
+        API->>AIS: gerar sugestao do campo 1
+        AIS->>DB: ler contexto do canvas / sugestoes
+        DB-->>AIS: contexto
+        AIS->>LLM: generate(prompt campo 1)
+        LLM-->>AIS: texto campo 1
+        AIS->>DB: salvar sugestao campo 1
+        DB-->>AIS: OK
+        AIS-->>API: payload campo 1
+        API-->>FE: resposta campo 1
+        FE-->>U: renderiza campo 1 assim que chega
+    and Campo 2
+        FE->>API: POST /canvas/{field2}/recommendation
+        API->>AIS: gerar sugestao do campo 2
+        AIS->>DB: ler contexto do canvas / sugestoes
+        DB-->>AIS: contexto
+        AIS->>LLM: generate(prompt campo 2)
+        LLM-->>AIS: texto campo 2
+        AIS->>DB: salvar sugestao campo 2
+        DB-->>AIS: OK
+        AIS-->>API: payload campo 2
+        API-->>FE: resposta campo 2
+        FE-->>U: renderiza campo 2 assim que chega
+    and Campo N
+        FE->>API: POST /canvas/{fieldN}/recommendation
+        API->>AIS: gerar sugestao do campo N
+        AIS->>DB: ler contexto do canvas / sugestoes
+        DB-->>AIS: contexto
+        AIS->>LLM: generate(prompt campo N)
+        LLM-->>AIS: texto campo N
+        AIS->>DB: salvar sugestao campo N
+        DB-->>AIS: OK
+        AIS-->>API: payload campo N
+        API-->>FE: resposta campo N
+        FE-->>U: renderiza campo N assim que chega
+    end
+
+    Note over FE,U: Beneficio: o usuario nao espera o campo mais lento para ver os primeiros resultados

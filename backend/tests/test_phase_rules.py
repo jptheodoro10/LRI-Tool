@@ -1,6 +1,6 @@
-from app.models import Phase
+from app.domain.phases import DEFAULT_PHASE, MAX_PHASE, advance_phase
 
 
-def test_phase_order_lock():
-    order = [Phase.F1, Phase.F2, Phase.F3, Phase.F4, Phase.F5]
-    assert order.index(Phase.F3) > order.index(Phase.F2)
+def test_phase_advances_until_max():
+    assert advance_phase(DEFAULT_PHASE) == DEFAULT_PHASE + 1
+    assert advance_phase(MAX_PHASE) == MAX_PHASE

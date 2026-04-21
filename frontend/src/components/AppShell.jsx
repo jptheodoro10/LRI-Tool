@@ -1,6 +1,5 @@
 import React from "react";
-import { Link } from "react-router-dom";
-import { useAI } from "../context/AIContext";
+import { Link, useLocation } from "react-router-dom";
 import logoPUC from "../img/logoPUC.png";
 
 export default function AppShell({
@@ -9,13 +8,14 @@ export default function AppShell({
   children,
   participantMode = false,
 }) {
-  const { aiEnabled, toggleAI } = useAI();
+  const location = useLocation();
+  const participantView = participantMode || location.search.includes("mode=participant");
 
   return (
     <div className="app-root">
       <header className="topbar">
         <div className="topbar-inner">
-          {participantMode ? (
+          {participantView ? (
             <span className="brand">LRI Tool</span>
           ) : (
             <div>
@@ -26,21 +26,15 @@ export default function AppShell({
             </div>
           )}
           <div className="topbar-right">
-            <button
-              className={`btn ${aiEnabled ? "btn-ai-on" : "btn-ai-off"}`}
-              onClick={toggleAI}
-            >
-              AI {aiEnabled ? "ON" : "OFF"}
-            </button>
-            {user ? (
-              <span className="user-email">{user.email}</span>
-            ) : (
-              <span className="user-email">Participant</span>
-            )}
-            {user && (
-              <button className="btn btn-ghost" onClick={onLogout}>
-                Logout
-              </button>
+            {!participantView && (
+              <>
+                {user && <span className="user-email">{user.email}</span>}
+                {user && (
+                  <button className="btn btn-ghost" onClick={onLogout}>
+                    Logout
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

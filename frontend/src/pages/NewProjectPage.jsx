@@ -17,7 +17,7 @@ export default function NewProjectPage({ token }) {
     setLoading(true);
     setError('');
     try {
-      const project = await api('/projects', 'POST', { title: title.trim() }, token);
+      const project = await api('/projects', 'POST', { title: title.trim(), ai_mode_enabled: true }, token);
       navigate(`/projects/${project.id}/phase/1`);
     } catch (err) {
       setError(err.message);

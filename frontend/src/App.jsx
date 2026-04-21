@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { api } from './services/api';
 import AppShell from './components/AppShell';
-import { AIProvider } from './context/AIContext';
 import DashboardPage from './pages/DashboardPage';
 import InvitePage from './pages/InvitePage';
 import LoginPage from './pages/LoginPage';
@@ -131,9 +130,5 @@ function AppRoutes() {
 }
 
 export default function App() {
-  return (
-    <AIProvider>
-      <AppRoutes />
-    </AIProvider>
-  );
+  return <AppRoutes />;
 }

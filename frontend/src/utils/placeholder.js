@@ -1,11 +1,21 @@
+const phaseCanvasKeysInOrder = [
+  'problem',
+  'stakeholders',
+  'research_questions',
+  'hypotheses',
+  'method',
+  'evaluation',
+  'risks',
+];
+
 const phase1PlaceholdersInOrder = [
-  'Ex: Many Machine Learning (ML) projects are developed by data scientists from diverse backgrounds without a solid foundation in software design principles, making it difficult to understand and maintain the ML code in the long term...',
-  'Ex: In the context of industrial ML code, the experimental and iterative nature of ML model development encourages rapid coding practices, often neglecting software design principles...',
-  'Ex: Poorly designed ML projects suffer from maintenance and sustainability problems, leading to increased costs, low productivity and difficulty in scaling and evolving systems...',
-  'Ex: Data scientist involved in maintaining ML systems...',
-  'Ex: Aho et al. Demystifying data science projects: A look on the people and process of data science today. PROFES 2020...',
-  'Ex: Analyze the <application of SOLID design principles> for the purpose of <characterization> with respect to their <impact on ML code understanding> from the point of view of <data scientists> in the context of <industrial ML code>...',
-  'Ex: List the key research questions your study must answer. Example: How does this approach affect code understanding? What benefits are perceived by practitioners?',
+  'Describe the pain point or opportunity to be addressed. Clarify its origin, current relevance, and potential future persistence, from the perspective of those affected.',
+  'Characterize the environment in which the problem occurs. Provide relevant contextual details (e.g., organization type, project stage, tools, team structure) to situate the problem clearly.',
+  'Explain the consequences of not solving the problem and the potential benefits of addressing it. Consider perspectives such as business impact, Return of Investiment, innovation, and broader relevance.',
+  'Identify the people directly and indirectly involved, affected, or interested in solving the problem. Consider roles, responsibilities, and motivations.',
+  'Present the initial scoping of scientific evidence related to the problem and related solution options.',
+  'Define the objectives of your research problem (e.g., analyze different interventions).',
+  'Define the research questions for your "research problem" keeping in mind the actual, ideal and proposed situation.',
 ];
 
 const phase1FieldOrder = [
@@ -18,8 +28,22 @@ const phase1FieldOrder = [
   'What research questions?',
 ];
 
+const fieldPlaceholderMap = Object.fromEntries(
+  phaseCanvasKeysInOrder.map((field, idx) => [field, phase1PlaceholdersInOrder[idx]])
+);
+
+const fieldLabelMap = Object.fromEntries(
+  phaseCanvasKeysInOrder.map((field, idx) => [field, phase1FieldOrder[idx]])
+);
+
 export function getFieldPlaceholder(field) {
-  const idx = phase1FieldOrder.indexOf(field);
-  if (idx >= 0) return phase1PlaceholdersInOrder[idx];
+  if (fieldPlaceholderMap[field]) return fieldPlaceholderMap[field];
   return `Write ${String(field || '').replaceAll('_', ' ')}...`;
+}
+
+export function getFieldLabel(field) {
+  if (fieldLabelMap[field]) return fieldLabelMap[field];
+  return String(field || '')
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, (m) => m.toUpperCase());
 }
