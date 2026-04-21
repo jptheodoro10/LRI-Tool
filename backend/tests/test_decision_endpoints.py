@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.core.security import create_access_token
 from app.db.base import Base
 from app.main import app
@@ -451,8 +452,9 @@ def test_advancing_phase2_to_phase3_keeps_current_cycle_canvas_prefilled(app_cli
     assert items[0]['response']['content'] == 'Phase 2 content that must stay visible on phase 3 start'
 
 
-def test_invites_are_listed_with_name_and_link(app_client, db_session):
+def test_invites_are_listed_with_name_and_link(app_client, db_session, monkeypatch):
     client, facilitator, headers = app_client
+    monkeypatch.setattr(settings, 'frontend_public_url', 'https://lri-tool.vercel.app')
     run = _create_phase5_run(db_session, facilitator.id)
     run.current_phase = 2
     db_session.commit()
@@ -464,7 +466,7 @@ def test_invites_are_listed_with_name_and_link(app_client, db_session):
     )
     assert created.status_code == 200
     created_payload = created.json()
-    assert created_payload['invite_url'].startswith('http://localhost:5173/invite/')
+    assert created_payload['invite_url'].startswith('https://lri-tool.vercel.app/invite/')
 
     listed = client.get(f'/projects/{run.id}/invites', headers=headers)
     assert listed.status_code == 200
@@ -472,7 +474,35 @@ def test_invites_are_listed_with_name_and_link(app_client, db_session):
     assert len(items) == 1
     assert items[0]['name'] == 'Alice Johnson'
     assert items[0]['status'] == 'pending'
-    assert items[0]['invite_url'].startswith('http://localhost:5173/invite/')
+    assert items[0]['invite_url'].startswith('https://lri-tool.vercel.app/invite/')
+
+
+def test_accepting_used_invite_returns_specific_error(app_client, db_session):
+    client, facilitator, headers = app_client
+    run = _create_phase5_run(db_session, facilitator.id)
+    run.current_phase = 2
+    db_session.commit()
+
+    created = client.post(
+        f'/projects/{run.id}/invites',
+        json={'name': 'Alice Johnson'},
+        headers=headers,
+    )
+    assert created.status_code == 200
+    token = created.json()['invite_url'].rsplit('/', 1)[-1]
+
+    first_accept = client.post(
+        f'/invites/{token}/accept',
+        json={'email': 'alice@example.com'},
+    )
+    assert first_accept.status_code == 200
+
+    repeat_accept = client.post(
+        f'/invites/{token}/accept',
+        json={'email': 'alice@example.com'},
+    )
+    assert repeat_accept.status_code == 400
+    assert 'already used' in repeat_accept.json()['detail']
 
 
 def test_export_pdf_requires_final_go_or_abort_decision(app_client, db_session):

@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.db.session import get_db
 from app.domain.metrics import LEGACY_CRITERION_TO_METRIC, METRIC_TO_LEGACY_CRITERION
 from app.domain.phases import LEGACY_PHASE_ENUM, LEGACY_PHASE_TO_NUMBER
@@ -195,7 +196,8 @@ def create_invite(project_id: int, db: Session = Depends(get_db), current_user: 
 
     raw_token, invite = _invite_service(db).create_invite(run_id=project_id, owner_user_id=current_user.id, role='collaborator')
     db.commit()
-    return InviteOut(invite_url=f'http://localhost:5173/invite/{raw_token}', expires_at=invite.expires_at)
+    invite_url = f'{settings.frontend_public_url.rstrip("/")}/invite/{raw_token}'
+    return InviteOut(invite_url=invite_url, expires_at=invite.expires_at)
 
 
 @router.get('/invite/{token}')

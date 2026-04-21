@@ -53,8 +53,14 @@ class InviteService:
 
     def inspect_invite(self, raw_token: str):
         invite = self.invite_repo.get_by_token_hash(hash_token(raw_token))
-        if invite is None or invite.expires_at < datetime.utcnow() or invite.status != InviteStatus.PENDING:
-            raise ValueError('Invalid or expired invite')
+        if invite is None:
+            raise ValueError('Invite not found. Generate a new invite link from Phase 2.')
+        if invite.expires_at < datetime.utcnow():
+            raise ValueError('Invite expired. Generate a new invite link from Phase 2.')
+        if invite.status == InviteStatus.ACCEPTED:
+            raise ValueError('Invite already used. Generate a new invite link for this participant.')
+        if invite.status != InviteStatus.PENDING:
+            raise ValueError('Invite is no longer active. Generate a new invite link from Phase 2.')
         return invite
 
     def accept_invite(self, raw_token: str, email: str | None = None):

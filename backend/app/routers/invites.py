@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.db.session import get_db
 from app.models import User
 from app.repositories import InviteRepository, ParticipantRepository, RunRepository
@@ -29,7 +30,7 @@ def _service(db: Session) -> InviteService:
 def _invite_url_from_token(public_token: str | None) -> str | None:
     if not public_token:
         return None
-    return f'http://localhost:5173/invite/{public_token}'
+    return f'{settings.frontend_public_url.rstrip("/")}/invite/{public_token}'
 
 
 @router.post('/runs/{run_id}/invites', response_model=InviteOut)
@@ -54,7 +55,7 @@ def create_invite(
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
     db.commit()
-    return InviteOut(invite_url=f'http://localhost:5173/invite/{raw_token}', expires_at=invite.expires_at)
+    return InviteOut(invite_url=_invite_url_from_token(raw_token), expires_at=invite.expires_at)
 
 
 @router.get('/runs/{run_id}/invites', response_model=list[InviteListItemOut])
