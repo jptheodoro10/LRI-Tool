@@ -27,10 +27,6 @@ from app.services.score_service import ScoreService
 router = APIRouter(tags=['runs'])
 
 ALLOWED_DECISIONS = {'GO', 'ABORT', 'PIVOT'}
-DECISION_TO_MESSAGE = {
-    'GO': 'The formulated problem received a \'Go\' because of its high perceived relevance!',
-    'ABORT': 'The formulated problem was aborted because of its low perceived relevance!',
-}
 PHASE3_CANVAS_ORDER = [
     'problem',
     'stakeholders',
@@ -61,6 +57,7 @@ def _service(db: Session) -> RunService:
         run_repo=RunRepository(db),
         participant_repo=ParticipantRepository(db),
         invite_repo=InviteRepository(db),
+        canvas_repo=CanvasRepository(db),
     )
 
 
@@ -86,6 +83,7 @@ def _run_out_payload(run, db: Session, invite_links_generated: bool):
     return {
         'id': run.id,
         'title': run.title,
+        'problem_synthesis': run.problem_synthesis,
         'current_phase': run.current_phase,
         'ai_mode_enabled': run.ai_mode_enabled,
         'status': run.status,
@@ -196,6 +194,7 @@ def patch_run(
             owner_user_id=current_user.id,
             ai_mode_enabled=payload.ai_mode_enabled,
             title=payload.title,
+            problem_synthesis=payload.problem_synthesis,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -340,21 +339,21 @@ def export_pdf(
     phase4_lines: list[str] = []
     for metric_key, label in PHASE4_METRIC_ORDER:
         info = aggregates.get(metric_key, {})
-        avg = float(info.get('avg', 0.0) or 0.0)
+        median = float(info.get('median', 0.0) or 0.0)
         count = int(info.get('count', 0) or 0)
         if count > 0:
-            phase4_lines.append(f'{label}: {avg:.2f} ({count} responses)')
+            phase4_lines.append(f'{label}: {median:.2f} median ({count} responses)')
         else:
-            phase4_lines.append(f'{label}: {avg:.2f} (no responses)')
+            phase4_lines.append(f'{label}: {median:.2f} median (no responses)')
 
     phase_data = {
-        'Phase 3 - Formulated Problem': '\n\n'.join(phase3_lines) or 'No canvas entries.',
-        'Phase 4 - Assessment Averages': '\n'.join(phase4_lines),
+        'Formulated Problem': '\n\n'.join(phase3_lines) or 'No canvas entries.',
+        'Assessment Medians': '\n'.join(phase4_lines),
     }
 
     normalized_decision = (latest_decision or '').upper()
-    decision_message = DECISION_TO_MESSAGE.get(normalized_decision, '')
-    decision_text = f'{normalized_decision}\n{decision_message}'.strip()
+    synthesis_text = (run.problem_synthesis or '').strip()
+    decision_text = f'{normalized_decision}\n{synthesis_text}'.strip()
 
     normalized_project_name = re.sub(r'[^a-z0-9]+', '', str(run.title or '').strip().lower()) or f'project{run_id}'
     out_path = _exports_dir() / f'{normalized_project_name}_report.pdf'

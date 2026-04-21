@@ -8,7 +8,6 @@ import {
   phaseConfig,
   phaseLabels,
 } from "../config/phaseConfig";
-import { useAI } from "../context/AIContext";
 import { API_URL, api } from "../services/api";
 
 const phaseFields = {
@@ -132,31 +131,6 @@ function normalizeCanvasKey(rawKey) {
   return legacyCanvasKeyAliases[normalized] || null;
 }
 
-function phase3BlankStartKey(projectId, cycle) {
-  return `phase3_blank_start:${projectId}:${cycle}`;
-}
-
-function markPhase3BlankStart(projectId, cycle) {
-  const payload = { startedAt: Date.now() };
-  sessionStorage.setItem(phase3BlankStartKey(projectId, cycle), JSON.stringify(payload));
-}
-
-function getPhase3BlankStart(projectId, cycle) {
-  const raw = sessionStorage.getItem(phase3BlankStartKey(projectId, cycle));
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed.startedAt !== "number") return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function clearPhase3BlankStart(projectId, cycle) {
-  sessionStorage.removeItem(phase3BlankStartKey(projectId, cycle));
-}
-
 function mapCanvasItems(items) {
   const nextEntries = {};
   const nextSuggestions = {};
@@ -185,7 +159,6 @@ export default function ProjectPhasePage({ token, me }) {
   const { id, phaseNumber } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { aiEnabled, setAIEnabled } = useAI();
 
   const projectId = Number(id);
   const routePhase = Number(phaseNumber);
@@ -212,10 +185,18 @@ export default function ProjectPhasePage({ token, me }) {
   const [error, setError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [isExporting, setIsExporting] = useState(false);
+  const [isGeneratingRecommendations, setIsGeneratingRecommendations] =
+    useState(false);
+  const [isGeneratingPhase3Overview, setIsGeneratingPhase3Overview] =
+    useState(false);
+  const [phase3OverviewsByField, setPhase3OverviewsByField] = useState({});
+  const [phase3OverviewPendingByField, setPhase3OverviewPendingByField] =
+    useState({});
 
   const [entries, setEntries] = useState({});
   const [suggestions, setSuggestions] = useState({});
-  const [pendingByField, setPendingByField] = useState({});
+  const [recommendationPendingByField, setRecommendationPendingByField] =
+    useState({});
 
   const [inviteeName, setInviteeName] = useState("");
   const [generatedInvites, setGeneratedInvites] = useState([]);
@@ -243,12 +224,18 @@ export default function ProjectPhasePage({ token, me }) {
   });
   const [resultsInfo, setResultsInfo] = useState(null);
   const [commentsInfo, setCommentsInfo] = useState([]);
+  const [problemSynthesis, setProblemSynthesis] = useState("");
   const [selectedDecision, setSelectedDecision] = useState(null);
 
   const saveTimersRef = useRef({});
+  const problemSynthesisSaveTimerRef = useRef(null);
   const actionMessageTimerRef = useRef(null);
+  const phase1RecommendationGenerationRef = useRef(0);
+  const phase3OverviewGenerationRef = useRef(0);
   const entriesRef = useRef({});
   const lastSyncedCanvasRef = useRef({});
+  const problemSynthesisRef = useRef("");
+  const lastSavedProblemSynthesisRef = useRef("");
 
   const config = phaseConfig[routePhase] || phaseConfig[1];
   const fields = phaseFields[routePhase] || [];
@@ -303,38 +290,17 @@ export default function ProjectPhasePage({ token, me }) {
       token
     );
     const { nextEntries, nextSuggestions } = mapCanvasItems(data.items);
-    if (routePhase === 3) {
-      const cycle = Number(project?.current_cycle || 1);
-      const blankStart = getPhase3BlankStart(projectId, cycle);
-      if (blankStart) {
-        const hasPhase3Updates = (data.items || []).some((item) => {
-          const updatedAt = item?.response?.updated_at;
-          if (!updatedAt) return false;
-          const timestamp = Date.parse(updatedAt);
-          return Number.isFinite(timestamp) && timestamp > blankStart.startedAt;
-        });
-
-        if (!hasPhase3Updates) {
-          setEntries({});
-          setSuggestions({});
-          lastSyncedCanvasRef.current = {};
-          return data;
-        }
-
-        clearPhase3BlankStart(projectId, cycle);
-      }
-
-      setEntries(nextEntries);
-      setSuggestions(suggestionsEnabled ? nextSuggestions : {});
-      lastSyncedCanvasRef.current = { ...nextEntries };
-    } else {
-      setEntries((prev) => ({ ...prev, ...nextEntries }));
-      setSuggestions(suggestionsEnabled ? nextSuggestions : {});
-      lastSyncedCanvasRef.current = {
-        ...lastSyncedCanvasRef.current,
-        ...nextEntries,
-      };
-    }
+    setEntries((prev) =>
+      routePhase === 3 ? nextEntries : { ...prev, ...nextEntries }
+    );
+    setSuggestions(suggestionsEnabled ? nextSuggestions : {});
+    lastSyncedCanvasRef.current =
+      routePhase === 3
+        ? { ...nextEntries }
+        : {
+            ...lastSyncedCanvasRef.current,
+            ...nextEntries,
+          };
     return data;
   }
 
@@ -346,10 +312,6 @@ export default function ProjectPhasePage({ token, me }) {
       const projectData = await fetchProjectState();
       const serverPhase = currentServerPhase(projectData);
       if (serverPhase !== routePhase) {
-        if (routePhase === 2 && serverPhase === 3) {
-          const cycle = Number(projectData?.current_cycle || 1);
-          markPhase3BlankStart(projectId, cycle);
-        }
         navigate(participantRoute(serverPhase), { replace: true });
         return;
       }
@@ -400,50 +362,7 @@ export default function ProjectPhasePage({ token, me }) {
 
   useEffect(() => {
     if (!project) return;
-    if (
-      !isParticipant &&
-      typeof project.ai_mode_enabled === "boolean" &&
-      project.ai_mode_enabled !== aiEnabled
-    ) {
-      setAIEnabled(project.ai_mode_enabled);
-    }
-  }, [project?.id, project?.ai_mode_enabled]);
-
-  useEffect(() => {
-    if (!project || isParticipant || !token) return;
-    if (project.ai_mode_enabled === aiEnabled) return;
-
-    let cancelled = false;
-    api(
-      `/projects/${projectId}`,
-      "PATCH",
-      { ai_mode_enabled: aiEnabled },
-      token
-    )
-      .then((updated) => {
-        if (cancelled) return;
-        setProject((prev) => ({
-          ...prev,
-          ai_mode_enabled: updated.ai_mode_enabled,
-        }));
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setActionMessage(`Failed to update AI mode: ${err.message}`);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [aiEnabled]);
-
-  useEffect(() => {
-    if (!project) return;
     const serverPhase = Number(project.current_phase || 1);
-    if (routePhase === 2 && serverPhase === 3) {
-      const cycle = Number(project.current_cycle || 1);
-      markPhase3BlankStart(projectId, cycle);
-    }
     if (serverPhase !== routePhase) {
       navigate(participantRoute(serverPhase), { replace: true });
     }
@@ -477,10 +396,6 @@ export default function ProjectPhasePage({ token, me }) {
         const latest = await fetchProjectState();
         const latestPhase = currentServerPhase(latest);
         if (latestPhase !== routePhase) {
-          if (routePhase === 2 && latestPhase === 3) {
-            const cycle = Number(latest.current_cycle || 1);
-            markPhase3BlankStart(projectId, cycle);
-          }
           setProject((prev) => ({ ...prev, ...latest }));
           navigate(participantRoute(latestPhase), { replace: true });
         } else {
@@ -507,13 +422,33 @@ export default function ProjectPhasePage({ token, me }) {
   }, [entries]);
 
   useEffect(() => {
+    problemSynthesisRef.current = problemSynthesis;
+  }, [problemSynthesis]);
+
+  useEffect(() => {
     lastSyncedCanvasRef.current = {};
+  }, [projectId, project?.current_cycle, routePhase]);
+
+  useEffect(() => {
+    phase1RecommendationGenerationRef.current += 1;
+    setRecommendationPendingByField({});
+    setIsGeneratingRecommendations(false);
+  }, [projectId, project?.current_cycle, routePhase]);
+
+  useEffect(() => {
+    phase3OverviewGenerationRef.current += 1;
+    setPhase3OverviewsByField({});
+    setPhase3OverviewPendingByField({});
+    setIsGeneratingPhase3Overview(false);
   }, [projectId, project?.current_cycle, routePhase]);
 
   useEffect(() => {
     return () => {
       if (actionMessageTimerRef.current) {
         clearTimeout(actionMessageTimerRef.current);
+      }
+      if (problemSynthesisSaveTimerRef.current) {
+        clearTimeout(problemSynthesisSaveTimerRef.current);
       }
       for (const timer of Object.values(saveTimersRef.current || {})) {
         clearTimeout(timer);
@@ -527,6 +462,10 @@ export default function ProjectPhasePage({ token, me }) {
       clearTimeout(timer);
     }
     saveTimersRef.current = {};
+    if (problemSynthesisSaveTimerRef.current) {
+      clearTimeout(problemSynthesisSaveTimerRef.current);
+      problemSynthesisSaveTimerRef.current = null;
+    }
   }, [projectId, routePhase]);
 
   useEffect(() => {
@@ -544,6 +483,13 @@ export default function ProjectPhasePage({ token, me }) {
     }
     setSelectedDecision(project.decision || null);
   }, [project?.id, project?.decision]);
+
+  useEffect(() => {
+    const nextSynthesis = project?.problem_synthesis || "";
+    setProblemSynthesis(nextSynthesis);
+    problemSynthesisRef.current = nextSynthesis;
+    lastSavedProblemSynthesisRef.current = nextSynthesis;
+  }, [project?.id, project?.current_cycle, project?.problem_synthesis]);
 
   function setTimedActionMessage(message, durationMs = 0) {
     setActionMessage(message);
@@ -569,12 +515,12 @@ export default function ProjectPhasePage({ token, me }) {
   }
 
   function fieldChange(field, content) {
-    if (routePhase === 3 && !isParticipant) {
-      const cycle = Number(project?.current_cycle || 1);
-      clearPhase3BlankStart(projectId, cycle);
-    }
-
     setEntries((prev) => ({ ...prev, [field]: content }));
+    if (routePhase === 3) {
+      phase3OverviewGenerationRef.current += 1;
+      setPhase3OverviewsByField({});
+      setPhase3OverviewPendingByField({});
+    }
 
     if (!config.collaborativeAutoSave || !actorParticipantId) return;
 
@@ -585,24 +531,10 @@ export default function ProjectPhasePage({ token, me }) {
     );
   }
 
-  async function refreshCanvasUntilSuggestion(maxTries = 6) {
-    if (!suggestionsEnabled) return;
-
-    for (let i = 0; i < maxTries; i += 1) {
-      const data = await fetchCanvas();
-      const hasAnySuggestion = (data.items || []).some((item) =>
-        Boolean(item.suggestion?.output?.text)
-      );
-      if (hasAnySuggestion) return;
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-  }
-
   async function saveEntry(field, content, explicit = false) {
     if (!project || !actorParticipantId) return;
 
     try {
-      setPendingByField((prev) => ({ ...prev, [field]: true }));
       await api(
         `/projects/${projectId}/canvas/${encodeURIComponent(field)}/response`,
         "PUT",
@@ -613,14 +545,9 @@ export default function ProjectPhasePage({ token, me }) {
         token
       );
       lastSyncedCanvasRef.current[field] = content ?? "";
-      if (suggestionsEnabled) {
-        await refreshCanvasUntilSuggestion();
-      }
       if (explicit) setTimedActionMessage("Saved.", 4000);
     } catch (err) {
       setActionMessage(err.message);
-    } finally {
-      setPendingByField((prev) => ({ ...prev, [field]: false }));
     }
   }
 
@@ -628,6 +555,55 @@ export default function ProjectPhasePage({ token, me }) {
     for (const field of fields) {
       await saveEntry(field, entries[field] || "", true);
     }
+  }
+
+  async function persistProblemSynthesis(explicit = false) {
+    if (!project || isParticipant || !token) return true;
+
+    const nextValue = String(problemSynthesisRef.current || "");
+    if (nextValue === lastSavedProblemSynthesisRef.current) return true;
+
+    try {
+      const updated = await api(
+        `/projects/${projectId}`,
+        "PATCH",
+        { problem_synthesis: nextValue },
+        token
+      );
+      lastSavedProblemSynthesisRef.current = updated.problem_synthesis || "";
+      setProject((prev) =>
+        prev
+          ? { ...prev, problem_synthesis: updated.problem_synthesis || "" }
+          : prev
+      );
+      if (explicit) setTimedActionMessage("Problem synthesis saved.", 2500);
+      return true;
+    } catch (err) {
+      setActionMessage(`Failed to save problem synthesis: ${err.message}`);
+      return false;
+    }
+  }
+
+  function handleProblemSynthesisChange(event) {
+    const nextValue = event.target.value;
+    setProblemSynthesis(nextValue);
+
+    if (problemSynthesisSaveTimerRef.current) {
+      clearTimeout(problemSynthesisSaveTimerRef.current);
+    }
+
+    problemSynthesisSaveTimerRef.current = setTimeout(() => {
+      void persistProblemSynthesis(false);
+      problemSynthesisSaveTimerRef.current = null;
+    }, 700);
+  }
+
+  async function handleProblemSynthesisBlur() {
+    if (problemSynthesisSaveTimerRef.current) {
+      clearTimeout(problemSynthesisSaveTimerRef.current);
+      problemSynthesisSaveTimerRef.current = null;
+    }
+    await persistProblemSynthesis(true);
   }
 
   async function persistPhaseEntriesBeforeAdvance() {
@@ -640,7 +616,6 @@ export default function ProjectPhasePage({ token, me }) {
 
     try {
       for (const field of editedFields) {
-        setPendingByField((prev) => ({ ...prev, [field]: true }));
         await api(
           `/projects/${projectId}/canvas/${encodeURIComponent(field)}/response`,
           "PUT",
@@ -651,7 +626,6 @@ export default function ProjectPhasePage({ token, me }) {
           token
         );
         lastSyncedCanvasRef.current[field] = entries[field] ?? "";
-        setPendingByField((prev) => ({ ...prev, [field]: false }));
       }
       return true;
     } catch (err) {
@@ -659,12 +633,193 @@ export default function ProjectPhasePage({ token, me }) {
         `Failed to save phase content before advancing: ${err.message}`
       );
       return false;
+    }
+  }
+
+  async function generateRecommendations() {
+    if (
+      isParticipant ||
+      routePhase !== 1 ||
+      !project?.ai_mode_enabled ||
+      isGeneratingRecommendations
+    ) {
+      return;
+    }
+
+    const filledFields = fields.filter(
+      (field) => String(entries[field] || "").trim().length > 0
+    );
+    const emptyFields = fields.filter(
+      (field) => String(entries[field] || "").trim().length === 0
+    );
+
+    if (filledFields.length === 0) {
+      setActionMessage(
+        "Fill at least one board field before requesting recommendations."
+      );
+      return;
+    }
+
+    if (emptyFields.length === 0) {
+      setTimedActionMessage("All board fields are already filled.", 2500);
+      return;
+    }
+
+    clearPendingFieldSaveTimers();
+    const persisted = await persistPhaseEntriesBeforeAdvance();
+    if (!persisted) return;
+
+    setIsGeneratingRecommendations(true);
+    const generationId = phase1RecommendationGenerationRef.current + 1;
+    phase1RecommendationGenerationRef.current = generationId;
+    setRecommendationPendingByField(
+      Object.fromEntries(emptyFields.map((field) => [field, true]))
+    );
+
+    try {
+      const failures = [];
+      const tasks = emptyFields.map((field) =>
+        api(
+          `/projects/${projectId}/canvas/${encodeURIComponent(field)}/recommendation`,
+          "POST",
+          {},
+          token
+        )
+          .then((data) => {
+            if (phase1RecommendationGenerationRef.current !== generationId) {
+              return;
+            }
+            const suggestedText = String(data?.suggested_text || "").trim();
+            if (!suggestedText) return;
+            setSuggestions((prev) => ({
+              ...prev,
+              [field]: {
+                suggested_text: suggestedText,
+                status: data?.status || "succeeded",
+              },
+            }));
+          })
+          .catch((err) => {
+            failures.push({ field, message: err.message });
+          })
+          .finally(() => {
+            if (phase1RecommendationGenerationRef.current !== generationId) {
+              return;
+            }
+            setRecommendationPendingByField((prev) => ({
+              ...prev,
+              [field]: false,
+            }));
+          })
+      );
+
+      await Promise.allSettled(tasks);
+      if (phase1RecommendationGenerationRef.current !== generationId) return;
+
+      const generatedCount = emptyFields.length - failures.length;
+      if (generatedCount > 0 && failures.length === 0) {
+        setTimedActionMessage(
+          `${generatedCount} recommendation${
+            generatedCount === 1 ? "" : "s"
+          } ready.`,
+          3000
+        );
+      } else if (generatedCount > 0) {
+        setActionMessage(
+          `${generatedCount} recommendation${
+            generatedCount === 1 ? "" : "s"
+          } ready. ${failures.length} failed.`
+        );
+      } else {
+        setTimedActionMessage("No recommendations were generated.", 2500);
+      }
+    } catch (err) {
+      setActionMessage(err.message);
     } finally {
-      setPendingByField((prev) => {
-        const next = { ...prev };
-        for (const field of editedFields) next[field] = false;
-        return next;
-      });
+      setIsGeneratingRecommendations(false);
+    }
+  }
+
+  async function generatePhase3Overview() {
+    if (
+      isParticipant ||
+      routePhase !== 3 ||
+      !project?.ai_mode_enabled ||
+      isGeneratingPhase3Overview
+    ) {
+      return;
+    }
+
+    if (emptyBoardFields.length > 0) {
+      setActionMessage(
+        "Fill every canvas field before requesting the overview."
+      );
+      return;
+    }
+
+    clearPendingFieldSaveTimers();
+    const persisted = await persistPhaseEntriesBeforeAdvance();
+    if (!persisted) return;
+
+    setIsGeneratingPhase3Overview(true);
+    const generationId = phase3OverviewGenerationRef.current + 1;
+    phase3OverviewGenerationRef.current = generationId;
+    setPhase3OverviewsByField({});
+    setPhase3OverviewPendingByField(
+      Object.fromEntries(fields.map((field) => [field, true]))
+    );
+
+    try {
+      const failures = [];
+      const tasks = fields.map((field) =>
+        api(
+          `/projects/${projectId}/canvas/${encodeURIComponent(field)}/overview`,
+          "POST",
+          {},
+          token
+        )
+          .then((data) => {
+            if (phase3OverviewGenerationRef.current !== generationId) return;
+            const overviewText = String(data?.overview_text || "").trim();
+            if (overviewText) {
+              setPhase3OverviewsByField((prev) => ({
+                ...prev,
+                [field]: overviewText,
+              }));
+            }
+          })
+          .catch((err) => {
+            failures.push({ field, message: err.message });
+          })
+          .finally(() => {
+            if (phase3OverviewGenerationRef.current !== generationId) return;
+            setPhase3OverviewPendingByField((prev) => ({
+              ...prev,
+              [field]: false,
+            }));
+          })
+      );
+
+      await Promise.allSettled(tasks);
+      if (phase3OverviewGenerationRef.current !== generationId) return;
+
+      const generatedCount = fields.length - failures.length;
+      if (generatedCount > 0 && failures.length === 0) {
+        setTimedActionMessage(
+          `${generatedCount} overview${generatedCount === 1 ? "" : "s"} ready.`,
+          3000
+        );
+      } else if (generatedCount > 0) {
+        setActionMessage(
+          `${generatedCount} overview${generatedCount === 1 ? "" : "s"} ready. ${failures.length} failed.`
+        );
+      } else {
+        setTimedActionMessage("No overviews were generated.", 2500);
+      }
+    } catch (err) {
+      setActionMessage(err.message);
+    } finally {
+      setIsGeneratingPhase3Overview(false);
     }
   }
 
@@ -675,6 +830,18 @@ export default function ProjectPhasePage({ token, me }) {
 
   function dismissSuggestion(field) {
     setSuggestions((prev) => ({ ...prev, [field]: null }));
+  }
+
+  function dismissPhase3Overview(field) {
+    setPhase3OverviewsByField((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    setPhase3OverviewPendingByField((prev) => ({
+      ...prev,
+      [field]: false,
+    }));
   }
 
   async function persistCanvasSnapshotByPolling() {
@@ -729,6 +896,12 @@ export default function ProjectPhasePage({ token, me }) {
   async function advancePhase() {
     if (isParticipant) return;
     const isFollowUpCycle = Number(project?.current_cycle || 1) > 1;
+    if (routePhase <= 3 && emptyBoardFields.length > 0) {
+      setActionMessage(
+        "Fill every canvas field before advancing to the next phase."
+      );
+      return;
+    }
 
     if (
       routePhase === 2 &&
@@ -765,16 +938,6 @@ export default function ProjectPhasePage({ token, me }) {
       );
       setProject(updated);
       const nextPhase = Number(updated.current_phase || routePhase);
-      if (!isParticipant && routePhase === 2 && nextPhase === 3) {
-        const cycle = Number(
-          updated.current_cycle || project?.current_cycle || 1
-        );
-        markPhase3BlankStart(projectId, cycle);
-        setEntries({});
-        setSuggestions({});
-        entriesRef.current = {};
-        lastSyncedCanvasRef.current = {};
-      }
       navigate(participantRoute(nextPhase));
     } catch (err) {
       setActionMessage(err.message);
@@ -1016,6 +1179,9 @@ export default function ProjectPhasePage({ token, me }) {
       return;
     }
 
+    const synthesisSaved = await persistProblemSynthesis(false);
+    if (!synthesisSaved) return;
+
     const payload = {
       decision,
       justification: phase5DecisionMessages[decision] || "",
@@ -1075,6 +1241,9 @@ export default function ProjectPhasePage({ token, me }) {
   async function exportPdf() {
     if (!token || isParticipant || isExporting || !project) return;
     try {
+      const synthesisSaved = await persistProblemSynthesis(false);
+      if (!synthesisSaved) return;
+
       setIsExporting(true);
       setActionMessage("Preparing PDF export...");
       const data = await api(
@@ -1135,7 +1304,16 @@ export default function ProjectPhasePage({ token, me }) {
     routePhase === 4 && config.requiresAllParticipantsDone
       ? !completionInfo.all_done
       : false;
-  const advanceDisabled = missingInviteForPhase3 || phase4Blocked;
+  const filledBoardFields = fields.filter(
+    (field) => String(entries[field] || "").trim().length > 0
+  );
+  const emptyBoardFields = fields.filter(
+    (field) => String(entries[field] || "").trim().length === 0
+  );
+  const canvasAdvanceBlocked =
+    !isParticipant && routePhase <= 3 && emptyBoardFields.length > 0;
+  const advanceDisabled =
+    missingInviteForPhase3 || phase4Blocked || canvasAdvanceBlocked;
   const assessmentSubmitted =
     assessmentSaved.valuable &&
     assessmentSaved.feasible &&
@@ -1148,6 +1326,10 @@ export default function ProjectPhasePage({ token, me }) {
   const hasFinalDecision =
     finalDecisionKey === "GO" || finalDecisionKey === "ABORT";
   const canEditCanvas = !isParticipant;
+  const showRecommendationButton =
+    routePhase === 1 && !isParticipant && Boolean(project?.ai_mode_enabled);
+  const showPhase3OverviewButton =
+    routePhase === 3 && !isParticipant && Boolean(project?.ai_mode_enabled);
 
   return (
     <div className="project-layout">
@@ -1170,16 +1352,63 @@ export default function ProjectPhasePage({ token, me }) {
         <div className="card">
           {routePhase <= 3 && (
             <>
-              <h2>
-                {isParticipant ? "Workshop Contribution" : "Board Content"}
-              </h2>
+              <div className="section-header board-section-header">
+                <h2>
+                  {isParticipant ? "Workshop Contribution" : "Board Content"}
+                </h2>
+                {(showRecommendationButton || showPhase3OverviewButton) && (
+                  <div className="board-actions">
+                    {showRecommendationButton && (
+                      <button
+                        className="btn btn-success"
+                        type="button"
+                        onClick={generateRecommendations}
+                        disabled={
+                          isGeneratingRecommendations ||
+                          filledBoardFields.length === 0 ||
+                          emptyBoardFields.length === 0
+                        }
+                      >
+                        {isGeneratingRecommendations
+                          ? "Gerando..."
+                          : "Obter recomendacao"}
+                      </button>
+                    )}
+                    {showPhase3OverviewButton && (
+                      <button
+                        className="btn btn-success"
+                        type="button"
+                        onClick={generatePhase3Overview}
+                        disabled={
+                          isGeneratingPhase3Overview ||
+                          emptyBoardFields.length > 0
+                        }
+                      >
+                        {isGeneratingPhase3Overview
+                          ? "Generating..."
+                          : "Get overview"}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
               {fields.map((f) => (
                 <div key={f}>
                   <FieldEditor
                     field={f}
                     value={entries[f]}
                     suggestion={suggestionsEnabled ? suggestions[f] : null}
-                    pending={suggestionsEnabled ? pendingByField[f] : false}
+                    aiOverview={
+                      routePhase === 3 ? phase3OverviewsByField[f] : null
+                    }
+                    aiOverviewPending={
+                      routePhase === 3 ? phase3OverviewPendingByField[f] : false
+                    }
+                    pending={
+                      suggestionsEnabled
+                        ? recommendationPendingByField[f]
+                        : false
+                    }
                     readOnly={!canEditCanvas}
                     labelOverride={
                       routePhase === 3 ? phase3CanvasTitles[f] : undefined
@@ -1188,6 +1417,7 @@ export default function ProjectPhasePage({ token, me }) {
                     onChange={fieldChange}
                     onAccept={acceptSuggestion}
                     onDismiss={dismissSuggestion}
+                    onDismissOverview={dismissPhase3Overview}
                   />
                 </div>
               ))}
@@ -1497,6 +1727,29 @@ export default function ProjectPhasePage({ token, me }) {
                   <p className="muted">No comments submitted yet.</p>
                 )}
               </div>
+              {!isParticipant && (
+                <div className="decision-section">
+                  <div className="decision-divider" />
+                  <h2>Problem Synthesis</h2>
+                  <div className="field-card">
+                    <div className="form-grid">
+                      <label htmlFor="problem-synthesis">
+                        Researcher synthesis of the problem
+                      </label>
+                      <textarea
+                        id="problem-synthesis"
+                        value={problemSynthesis}
+                        onChange={handleProblemSynthesisChange}
+                        onBlur={handleProblemSynthesisBlur}
+                        placeholder="Write the problem synthesis that should appear in the PDF."
+                      />
+                      <p className="hint">
+                        Saved automatically and used in the PDF decision text.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -1535,6 +1788,12 @@ export default function ProjectPhasePage({ token, me }) {
             <p className="hint">
               Waiting for all participants to complete evaluation before
               advancing to Phase 5.
+            </p>
+          )}
+
+          {canvasAdvanceBlocked && (
+            <p className="hint">
+              Fill every canvas field before advancing to the next phase.
             </p>
           )}
 

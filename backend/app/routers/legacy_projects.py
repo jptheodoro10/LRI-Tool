@@ -45,11 +45,11 @@ LEGACY_JOBS: dict[int, dict] = {}
 PHASE1_LEGACY_MAP = {
     'Describe the pain point': 'problem',
     'Characterize the environment': 'stakeholders',
-    'Consequences/Benefits': 'evaluation',
-    'Identify People Involved': 'stakeholders',
-    'What scientific evidence?': 'research_questions',
-    'Define the objectives': 'hypotheses',
-    'What research questions?': 'research_questions',
+    'Consequences/Benefits': 'research_questions',
+    'Identify People Involved': 'hypotheses',
+    'What scientific evidence?': 'method',
+    'Define the objectives': 'evaluation',
+    'What research questions?': 'risks',
 }
 PHASE2_LEGACY_MAP = {
     'alignment_notes': 'stakeholders',
@@ -109,6 +109,7 @@ def _run_service(db: Session) -> RunService:
         run_repo=RunRepository(db),
         participant_repo=ParticipantRepository(db),
         invite_repo=InviteRepository(db),
+        canvas_repo=CanvasRepository(db),
     )
 
 

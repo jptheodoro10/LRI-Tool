@@ -5,8 +5,15 @@ from app.api.deps import get_optional_current_user
 from app.db.session import get_db
 from app.models import User
 from app.repositories import AISuggestionRepository, CanvasRepository, ParticipantRepository, RunRepository
-from app.schemas.common import CanvasWriteRequest
+from app.schemas.common import (
+    CanvasSingleRecommendationResponse,
+    CanvasRecommendationsResponse,
+    CanvasWriteRequest,
+    Phase3OverviewResponse,
+    Phase3SingleOverviewResponse,
+)
 from app.services.canvas_service import CanvasService
+from app.services.ai_service import AISuggestionService
 
 router = APIRouter(tags=['canvas'])
 
@@ -38,6 +45,14 @@ def _ensure_run_access(
         raise HTTPException(status_code=404, detail='Run not found')
 
 
+def _ensure_owner_access(run_id: int, db: Session, current_user: User | None = None) -> None:
+    run = RunRepository(db).get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail='Run not found')
+    if current_user is None or run.owner_user_id != current_user.id:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+
+
 @router.get('/runs/{run_id}/canvas')
 @router.get('/projects/{run_id}/canvas')
 def get_canvas(
@@ -52,6 +67,82 @@ def get_canvas(
         return svc.get_canvas_view(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post('/runs/{run_id}/canvas/recommendations', response_model=CanvasRecommendationsResponse)
+@router.post('/projects/{run_id}/canvas/recommendations', response_model=CanvasRecommendationsResponse)
+def generate_canvas_recommendations(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    _ensure_owner_access(run_id=run_id, db=db, current_user=current_user)
+    try:
+        payload = AISuggestionService(db).generate_recommendations_for_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db.commit()
+    return payload
+
+
+@router.post(
+    '/runs/{run_id}/canvas/{question_key}/recommendation',
+    response_model=CanvasSingleRecommendationResponse,
+)
+@router.post(
+    '/projects/{run_id}/canvas/{question_key}/recommendation',
+    response_model=CanvasSingleRecommendationResponse,
+)
+def generate_canvas_recommendation(
+    run_id: int,
+    question_key: str,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    _ensure_owner_access(run_id=run_id, db=db, current_user=current_user)
+    try:
+        payload = AISuggestionService(db).generate_recommendation_for_question(run_id, question_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db.commit()
+    return payload
+
+
+@router.post('/runs/{run_id}/canvas/overview', response_model=Phase3OverviewResponse)
+@router.post('/projects/{run_id}/canvas/overview', response_model=Phase3OverviewResponse)
+def generate_phase3_overview(
+    run_id: int,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    _ensure_owner_access(run_id=run_id, db=db, current_user=current_user)
+    try:
+        payload = AISuggestionService(db).generate_phase3_overview(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db.commit()
+    return payload
+
+
+@router.post('/runs/{run_id}/canvas/{question_key}/overview', response_model=Phase3SingleOverviewResponse)
+@router.post('/projects/{run_id}/canvas/{question_key}/overview', response_model=Phase3SingleOverviewResponse)
+def generate_phase3_canvas_overview(
+    run_id: int,
+    question_key: str,
+    db: Session = Depends(get_db),
+    current_user: User | None = Depends(get_optional_current_user),
+):
+    _ensure_owner_access(run_id=run_id, db=db, current_user=current_user)
+    try:
+        payload = AISuggestionService(db).generate_phase3_canvas_overview(run_id, question_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db.commit()
+    return payload
 
 
 @router.patch('/runs/{run_id}/canvas/{question_key}')

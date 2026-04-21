@@ -163,6 +163,23 @@ def test_phase5_decision_can_be_submitted_via_runs_path(app_client, db_session):
     assert response.json()['decision'] == 'ABORT'
 
 
+def test_problem_synthesis_can_be_saved_via_patch(app_client, db_session):
+    client, facilitator, headers = app_client
+    run = _create_phase5_run(db_session, facilitator.id)
+
+    response = client.patch(
+        f'/projects/{run.id}',
+        json={'problem_synthesis': 'Condensed synthesis written by the researcher.'},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()['problem_synthesis'] == 'Condensed synthesis written by the researcher.'
+
+    db_session.refresh(run)
+    assert run.problem_synthesis == 'Condensed synthesis written by the researcher.'
+
+
 def test_pivot_allows_follow_up_decision_in_new_cycle(app_client, db_session):
     client, facilitator, headers = app_client
     run = _create_phase5_run(db_session, facilitator.id)
@@ -191,6 +208,25 @@ def test_pivot_allows_follow_up_decision_in_new_cycle(app_client, db_session):
     assert payload['current_cycle'] == 2
     assert payload['status'] == 'completed'
     assert payload['decision'] == 'GO'
+
+
+def test_pivot_clears_problem_synthesis_for_next_cycle(app_client, db_session):
+    client, facilitator, headers = app_client
+    run = _create_phase5_run(db_session, facilitator.id)
+    run.problem_synthesis = 'Synthesis from the previous cycle.'
+    db_session.commit()
+
+    pivot = client.post(
+        f'/projects/{run.id}/decision',
+        json={'decision': 'PIVOT'},
+        headers=headers,
+    )
+    assert pivot.status_code == 200
+    assert pivot.json()['current_phase'] == 2
+    assert pivot.json()['current_cycle'] == 2
+
+    db_session.refresh(run)
+    assert run.problem_synthesis == ''
 
 
 def test_second_decision_is_rejected(app_client, db_session):
@@ -369,7 +405,7 @@ def test_phase2_prefill_uses_latest_non_empty_previous_cycle(app_client, db_sess
     assert items[0]['response']['content'] == 'Answer from older non-empty cycle'
 
 
-def test_advancing_phase2_to_phase3_clears_current_cycle_canvas(app_client, db_session):
+def test_advancing_phase2_to_phase3_keeps_current_cycle_canvas_prefilled(app_client, db_session):
     client, facilitator, headers = app_client
     run = _create_phase5_run(db_session, facilitator.id)
     run.current_phase = 2
@@ -392,8 +428,8 @@ def test_advancing_phase2_to_phase3_clears_current_cycle_canvas(app_client, db_s
             run_id=run.id,
             question_id=question.id,
             participant_id=facilitator_participant.id,
-            cycle=run.current_cycle,
-            content='Phase 2 content that must be cleared on phase 3 start',
+            cycle=1,
+            content='Phase 2 content that must stay visible on phase 3 start',
         )
     )
     db_session.commit()
@@ -405,13 +441,14 @@ def test_advancing_phase2_to_phase3_clears_current_cycle_canvas(app_client, db_s
     remaining = db_session.scalars(
         select(CanvasResponse).where(CanvasResponse.run_id == run.id, CanvasResponse.cycle == 2)
     ).all()
-    assert remaining == []
+    assert len(remaining) == 1
+    assert remaining[0].content == 'Phase 2 content that must stay visible on phase 3 start'
 
     canvas = client.get(f'/projects/{run.id}/canvas', headers=headers)
     assert canvas.status_code == 200
     items = canvas.json()['items']
     assert len(items) == 1
-    assert items[0]['response'] is None
+    assert items[0]['response']['content'] == 'Phase 2 content that must stay visible on phase 3 start'
 
 
 def test_invites_are_listed_with_name_and_link(app_client, db_session):
@@ -451,7 +488,7 @@ def test_export_pdf_requires_final_go_or_abort_decision(app_client, db_session):
     assert 'final decision' in response.json()['detail'].lower()
 
 
-def test_export_pdf_contains_phase3_phase4_and_final_decision_without_comments(app_client, db_session):
+def test_export_pdf_contains_problem_synthesis_and_medians_without_comments(app_client, db_session):
     client, facilitator, headers = app_client
     run = _create_phase5_run(db_session, facilitator.id)
 
@@ -492,6 +529,13 @@ def test_export_pdf_contains_phase3_phase4_and_final_decision_without_comments(a
         ]
     )
     db_session.commit()
+
+    patch_response = client.patch(
+        f'/projects/{run.id}',
+        json={'problem_synthesis': 'Researchers synthesized the problem as a recurring operational bottleneck that merits immediate investigation.'},
+        headers=headers,
+    )
+    assert patch_response.status_code == 200
 
     score_payloads = [
         {
@@ -541,15 +585,20 @@ def test_export_pdf_contains_phase3_phase4_and_final_decision_without_comments(a
 
     pdf_text = file_path.read_bytes().decode('latin-1', errors='ignore')
     normalized_text = pdf_text.replace('\\(', '(').replace('\\)', ')')
-    assert 'Phase 3 - Formulated Problem' in normalized_text
+    assert 'Workshop date: ' in normalized_text
+    assert 'Formulated Problem' in normalized_text
     assert 'For the practical problem (what/how/why)' in normalized_text
     assert 'Manual process causes recurring data delays.' in normalized_text
-    assert 'Phase 4 - Assessment Averages' in normalized_text
-    assert 'Value: 7.00 (1 responses)' in normalized_text
-    assert 'Applicability: 6.00 (1 responses)' in normalized_text
-    assert 'Feasibility: 5.00 (1 responses)' in normalized_text
+    assert 'Assessment Medians' in normalized_text
+    assert 'Value: 7.00 median (1 responses)' in normalized_text
+    assert 'Applicability: 6.00 median (1 responses)' in normalized_text
+    assert 'Feasibility: 5.00 median (1 responses)' in normalized_text
     assert 'Decision' in normalized_text
     assert 'GO' in normalized_text
+    assert 'Researchers synthesized the problem as a recurring' in normalized_text
+    assert 'operational bottleneck' in normalized_text
+    assert 'merits immediate investigatio' in normalized_text
+    assert 'The formulated problem received a' not in normalized_text
     assert 'This comment must not appear in PDF.' not in normalized_text
     assert 'Alignment comment should be excluded.' not in normalized_text
     assert 'Feasibility comment should be excluded.' not in normalized_text

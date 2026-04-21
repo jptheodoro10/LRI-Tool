@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SAEnum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SAEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -13,6 +13,7 @@ class Run(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey('users.id'), index=True)
     title: Mapped[str] = mapped_column(String(255), default='Untitled Run')
+    problem_synthesis: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_phase: Mapped[int] = mapped_column(Integer, default=1)
     ai_mode_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     current_cycle: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

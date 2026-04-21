@@ -1,0 +1,330 @@
+ARQUITETURA DA APLICACAO LRI TOOL
+
+1. Visao geral
+
+A aplicacao e um sistema web para conduzir uma execucao de Lean Research Inception em 5 fases.
+Ela e dividida em:
+
+- frontend React + Vite
+- backend FastAPI
+- banco PostgreSQL
+- camada de IA com abstracao de provedor
+- exportacao de PDF
+
+O fluxo principal e:
+
+usuario -> frontend -> API FastAPI -> services -> repositories -> PostgreSQL
+
+Quando ha uso de IA:
+
+frontend -> endpoint de IA -> AISuggestionService -> LLMClient -> mock ou OpenAI -> resposta ao frontend
+
+
+2. Topologia em runtime
+
+O docker-compose sobe 4 servicos:
+
+- db: PostgreSQL
+- backend: API FastAPI
+- frontend: aplicacao React
+- worker: processo reservado para futuras filas/jobs, mas hoje sem papel central
+
+Hoje, os fluxos de IA relevantes para o produto sao request-driven. Ou seja: a chamada sai do navegador, entra no endpoint e a resposta volta na mesma interacao. Isso simplifica o ambiente e ajuda a manter o artefato reproduzivel localmente.
+
+
+3. Estrutura de backend
+
+O backend segue uma arquitetura em camadas:
+
+Router -> Service -> Repository -> Database
+
+Responsabilidade de cada camada:
+
+- Router: recebe HTTP, valida acesso, converte excecoes em respostas HTTP
+- Service: concentra regras de negocio e orquestra fluxos
+- Repository: encapsula acesso ao banco com SQLAlchemy
+- Models/DB: definem a estrutura persistida e constraints
+
+Beneficios:
+
+- separacao clara de responsabilidades
+- menor acoplamento entre HTTP, regra e persistencia
+- facilidade de teste
+- manutencao mais previsivel
+
+
+4. Dominio principal
+
+O agregado central e o Run.
+
+Run guarda:
+
+- titulo do projeto
+- fase atual
+- ciclo atual
+- status
+- se IA esta habilitada
+- sintese final do problema
+
+O sistema trabalha com 5 fases:
+
+- F1: preenchimento inicial do canvas
+- F2: alinhamento e geracao de convites
+- F3: revisao e reformulacao do problema
+- F4: avaliacao semantica pelos participantes
+- F5: decisao final e exportacao
+
+Tambem existe a ideia de ciclo:
+
+- se a decisao final for PIVOT, o projeto volta para a fase 2
+- o ciclo e incrementado
+- o canvas anterior e reutilizado como base
+
+Beneficios dessa decisao:
+
+- preserva historico logico de reformulacao
+- evita perder trabalho anterior
+- reduz retrabalho ao reiniciar a discussao
+
+
+5. Controle de acesso
+
+Existem dois modos principais de acesso:
+
+- pesquisador/facilitador: autenticado via JWT
+- participante convidado: entra por token publico de convite e opera com participant_id
+
+Beneficios:
+
+- separa claramente o fluxo do dono do projeto do fluxo do convidado
+- reduz friccao para participantes externos
+- mantem o backend com verificacao explicita por run e participant
+
+
+6. Canvas e colaboracao
+
+O canvas e reutilizado nas fases 1, 2 e 3. As respostas ficam em canvas_responses, organizadas por:
+
+- run
+- pergunta
+- ciclo
+
+Regra importante:
+
+- apenas o facilitador edita diretamente o canvas
+- participantes visualizam e depois contribuem pela avaliacao da fase 4
+
+Beneficios:
+
+- evita escrita concorrente em campos criticos
+- simplifica consistencia do board
+- reduz conflitos de autoria
+
+
+7. Arquitetura de IA
+
+Hoje existem dois modulos de IA de produto:
+
+7.1 Recomendacoes da Fase 1
+
+Objetivo:
+
+- sugerir texto para campos vazios com base nos campos ja preenchidos
+
+Fluxo:
+
+- o frontend identifica campos vazios
+- dispara uma requisicao por campo vazio
+- as requisicoes sao feitas em paralelo
+- cada resposta volta individualmente
+- cada sugestao aparece assim que chega
+
+Persistencia:
+
+- as sugestoes ficam em ai_suggestions
+
+Decisao importante: chamadas paralelas por campo
+
+Beneficios:
+
+- reduz tempo percebido de renderizacao
+- o usuario nao espera o lote inteiro terminar
+- o primeiro resultado pode aparecer mesmo se outro campo estiver lento
+- melhora sensacao de responsividade
+
+Decisao importante: persistir sugestoes da Fase 1
+
+Beneficios:
+
+- preserva estado ao recarregar a tela
+- evita perder resultado gerado
+- permite reaproveitar sugestoes quando o contexto nao mudou
+
+Decisao importante: usar context_hash
+
+Beneficios:
+
+- evita recomputacao desnecessaria
+- reduz custo de chamadas ao LLM
+- impede regeneracao da mesma sugestao quando o contexto do canvas continua igual
+
+
+7.2 Overview da Fase 3
+
+Objetivo:
+
+- analisar criticamente cada campo de um canvas totalmente preenchido
+
+Fluxo:
+
+- o frontend valida que todos os campos estao completos
+- dispara uma requisicao por campo
+- as requisicoes tambem rodam em paralelo
+- os overviews aparecem progressivamente na interface
+
+Persistencia:
+
+- nao sao persistidos no banco
+- vivem apenas no estado da UI
+
+Decisao importante: nao persistir o overview da Fase 3
+
+Beneficios:
+
+- evita poluir o banco com dados temporarios
+- mantem o banco focado em artefatos funcionais do processo
+- reduz complexidade de limpeza e versionamento desse tipo de saida
+
+
+7.3 Abstracao de provedor LLM
+
+A aplicacao usa LLMClient.generate(prompt) -> texto.
+
+Implementacoes atuais:
+
+- MockLLMClient
+- OpenAILLMClient
+
+Decisao importante: esconder o provedor atras de uma interface unica
+
+Beneficios:
+
+- desacopla services do SDK do fornecedor
+- facilita trocar de provedor depois
+- simplifica testes
+- permite fallback deterministico sem rede
+
+Decisao importante: mock deterministico como fallback
+
+Beneficios:
+
+- reproduzibilidade local
+- execucao offline
+- previsibilidade em testes e demonstracoes
+
+
+8. Salvamento e experiencia de uso
+
+O frontend tem autosave periodico do canvas e tambem tenta persistir o estado antes de acoes criticas, como:
+
+- gerar recomendacoes
+- gerar overview
+- avancar de fase
+
+Beneficios:
+
+- reduz risco de perder texto digitado
+- diminui inconsistencias entre UI e banco
+- garante que a IA trabalhe sobre o estado mais atual possivel
+
+
+9. Convites e participantes
+
+Na fase 2, o facilitador gera links de convite tokenizados.
+Na primeira rodada, a fase 3 so pode ser acessada depois que pelo menos um convite for gerado.
+Depois de um pivot, novos convites ficam bloqueados e o grupo e reaproveitado.
+
+Beneficios:
+
+- garante participacao minima antes da avaliacao posterior
+- estabiliza o conjunto de participantes nos ciclos seguintes
+- simplifica comparabilidade entre ciclos
+
+
+10. Avaliacao da Fase 4
+
+Participantes submetem notas de 1 a 7 para tres metricas:
+
+- impact
+- alignment
+- feasibility
+
+O backend agrega resultados e calcula medias, medianas e distribuicoes.
+O avancar de fase pode depender da conclusao de todos os respondentes esperados.
+
+Beneficios:
+
+- formaliza a decisao com dados agregados
+- permite que a fase 5 trabalhe sobre um resumo objetivo
+- reduz decisao puramente intuitiva
+
+
+11. Exportacao final
+
+Na fase 5, apos decisao GO ou ABORT, o backend gera um PDF com:
+
+- problema formulado
+- medianas da avaliacao
+- decisao final
+- sintese escrita pelo facilitador
+
+Beneficios:
+
+- consolida o workshop em um artefato exportavel
+- facilita compartilhamento e registro
+- separa bem dado operacional de dado de entrega
+
+
+12. Decisoes arquiteturais mais importantes e seus beneficios
+
+- Arquitetura em camadas
+  Beneficio: menor acoplamento e manutencao mais simples.
+
+- IA acionada por request, sem fila real neste momento
+  Beneficio: menor complexidade operacional e maior reprodutibilidade local.
+
+- Chamadas paralelas a LLM por campo no frontend
+  Beneficio: menor latencia percebida e renderizacao progressiva.
+
+- Persistencia de sugestoes da Fase 1
+  Beneficio: cache funcional e resiliencia a refresh.
+
+- Nao persistir overviews da Fase 3
+  Beneficio: banco mais limpo e sem estado efemero desnecessario.
+
+- Abstracao de provedor LLM
+  Beneficio: flexibilidade para trocar provider e testar offline.
+
+- Mock deterministico
+  Beneficio: reproducao confiavel do artefato.
+
+- Reuso do canvas entre ciclos apos pivot
+  Beneficio: continuidade do trabalho e menor retrabalho.
+
+- Facilitador como unico editor do canvas
+  Beneficio: menos conflito de escrita e consistencia maior.
+
+
+13. Limitacoes atuais
+
+- o worker ainda e placeholder
+- as chamadas de IA ainda sao sincronas do ponto de vista do endpoint
+- o frontend faz paralelismo no cliente, nao ha orquestracao batch inteligente no backend
+- nao existe observabilidade forte de latencia/custo de prompts
+
+
+14. Leitura rapida da arquitetura
+
+Se fosse resumir a arquitetura em uma frase:
+
+"Trata-se de uma aplicacao web com frontend React e backend FastAPI em camadas, centrada no agregado Run, com IA acionada sob demanda e renderizacao progressiva via chamadas paralelas por campo para acelerar a experiencia do usuario sem introduzir a complexidade de uma fila real."

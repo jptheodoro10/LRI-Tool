@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import BackgroundTasks
-
 from app.repositories import AISuggestionRepository, CanvasRepository, ParticipantRepository, RunRepository
-from app.services.ai_service import refresh_suggestions_background
 
 
 class CanvasService:
@@ -85,7 +82,7 @@ class CanvasService:
         question_key: str,
         participant_id: int,
         content: str,
-        background_tasks: BackgroundTasks | None = None,
+        background_tasks=None,
         allow_dynamic_questions: bool = False,
     ):
         run = self.run_repo.get(run_id)
@@ -126,8 +123,5 @@ class CanvasService:
                 question_id=question.id,
                 cycle=self._response_cycle_for_run(run),
             )
-
-        if run.current_phase == 1 and run.ai_mode_enabled and background_tasks is not None:
-            background_tasks.add_task(refresh_suggestions_background, run_id)
 
         return response, question

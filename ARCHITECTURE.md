@@ -1,404 +1,422 @@
-# LRI Tool – System Architecture
+# LRI Tool – Current System Architecture
 
 ## Overview
 
-The LRI Tool is a web application that supports the execution of the Lean Research Inception (LRI) framework.
+LRI Tool is a web application that supports Lean Research Inception runs through five phases:
 
-The system allows a facilitator (recruiter/researcher) to create a **Run** of the framework and guide participants through different phases. Participants collaborate by filling canvases, receiving AI assistance, and submitting evaluations.
+1. Initial canvas definition
+2. Alignment and invite generation
+3. Problem formulation review
+4. Semantic differential assessment
+5. Decision and PDF export
 
-The system must support:
+The current stack is:
 
-- Collaborative runs with multiple participants
-- Canvas-based structured inputs
-- Automatic AI suggestions for unfilled canvases
-- Invite links for external collaborators
-- Score submission and aggregation
-- Phase progression across the framework
+- Frontend: React + Vite
+- Backend API: FastAPI
+- Persistence: SQLAlchemy + Alembic
+- Database: PostgreSQL in Docker, SQLite in tests
+- AI provider abstraction: mock mode or OpenAI Responses API
 
-The architecture follows a layered backend structure: Router → Service (business logic) → Repository (DB access) → Database
+The system follows a layered backend structure:
 
----
+Router -> Service -> Repository -> Database
 
-# Core Domain Concepts
+## Runtime Topology
 
-## Run
+The repository ships with four Docker services:
 
-A **Run** represents one execution of the Lean Research Inception framework.
+- `db`: PostgreSQL
+- `backend`: FastAPI API
+- `frontend`: Vite frontend
+- `worker`: placeholder process reserved for future background jobs
 
-All participants collaborate inside the same run.
+At the moment, the AI features that matter to the product are request-driven. The worker remains available for future async jobs, but the active AI flows are handled directly by API requests.
 
-Properties:
+## Core Domain
+
+### Run
+
+A run is the main aggregate of the system. It stores the current lifecycle state of one Lean Research Inception execution.
+
+Relevant fields:
 
 - `id`
+- `title`
+- `owner_user_id`
 - `current_phase`
-- `ai_mode_enabled`
+- `current_cycle`
 - `status`
+- `ai_mode_enabled`
+- `problem_synthesis`
 - `created_at`
 - `updated_at`
 
-Important rule:
+Important rules:
 
-> Phase progression is global to the run.  
-> Participants never have their own phase state.
+- Phase progression is global to the run.
+- A pivot creates a new cycle and sends the run back to phase 2.
+- `problem_synthesis` is written by the facilitator in phase 5 and reused in the PDF export.
 
----
+### Participants
 
-## Participants
+Participants belong to a run. The facilitator is also represented as a participant record.
 
-Participants represent users collaborating inside a run.
-
-Roles may include:
-
-- facilitator / recruiter
-- invited collaborator
-- reviewer
-
-Properties:
+Relevant fields:
 
 - `id`
 - `run_id`
-- `user_id OR email`
+- `user_id`
+- `email`
 - `role`
 - `created_at`
 
----
+Current practical roles:
 
-## Invites
+- `facilitator`: owner/editor of the run
+- invited participant/collaborator records created through invite acceptance
 
-Invite links allow external collaborators to join a run.
+### Invites
 
-Properties:
+Invites let external participants join a run through a public tokenized URL.
+
+Relevant fields:
 
 - `id`
 - `run_id`
+- `public_token`
 - `token_hash`
 - `role`
 - `status`
-- `expires_at`
+- `invitee_name`
+- `participant_name`
 - `accepted_participant_id`
+- `expires_at`
 
-Invite flow:
+Important rules:
 
-1. Facilitator generates invite
-2. Invite link is shared
-3. Guest opens link and accepts invite
-4. Participant record is created
+- In cycle 1, phase 2 requires at least one generated invite before advancing to phase 3.
+- After a pivot, the participant group is kept. The UI prevents generating new invites in follow-up cycles.
 
----
+## Canvas System
 
-# Canvas System
+The canvas is reused across phases 1, 2, and 3. The questions are stable and keyed.
 
-Canvases represent structured questions that participants must answer.
+Current canonical keys:
 
-Important rule:
+- `problem`
+- `stakeholders`
+- `research_questions`
+- `hypotheses`
+- `method`
+- `evaluation`
+- `risks`
 
-> Canvases are **not tied to phases in the database**.
+### Canvas Questions
 
-Different phases may reuse the same canvas structure.
+`canvas_questions` stores metadata for each field:
 
-Example:
-
-- Phase 1 canvases
-- Phase 3 canvases (same structure, but collaborative)
-
-Canvases are identified using a **stable key**.
-
----
-
-## Canvas Questions
-
-The system contains predefined canvas questions.
-
-These are inserted via **seed data**.
-
-Properties:
-
-- `id`
-- `key` (unique identifier)
+- `key`
 - `title`
 - `prompt_template`
 
-Example keys:
-problem
-stakeholders
-research_questions
-hypotheses
-method
-evaluation
-risks
+### Canvas Responses
 
----
+`canvas_responses` stores one response per run, question, and cycle:
 
-## Canvas Responses
-
-Participants submit answers to canvases.
-
-Only **one final response per run per canvas** exists.
-
-Properties:
-
-- `id`
 - `run_id`
 - `question_id`
 - `participant_id`
+- `cycle`
 - `content`
 - `updated_at`
 
-Constraint: UNIQUE (run_id, question_id)
+Constraint:
 
-Meaning:
+- unique `(run_id, question_id, cycle)`
 
-Each canvas has a single current answer for the run.
+Important implementation detail:
 
----
+- Only the facilitator can edit canvas responses through the API.
+- Participants can view the board in phases 1 to 3, but they do not directly write canvas content.
 
-# AI Assistance
+### Cycle Reuse
 
-AI assistance helps generate suggestions for canvases that have not yet been answered.
+When a run pivots:
 
-AI suggestions are automatically triggered when a participant submits a canvas response.
+- the run goes back to phase 2
+- `current_cycle` is incremented
+- phase 2 is prefilled from the latest previous cycle that has canvas responses
+- advancing from phase 2 to phase 3 copies those responses into the new current cycle
 
-There is **no manual "generate AI" button**.
+## AI Architecture
 
----
+The AI layer currently contains two user-facing modules and one provider abstraction.
 
-## AI Trigger Logic
+### 1. Phase 1 Recommendations
 
-When a participant submits a canvas response:
+Purpose:
 
-1. The response is saved
-2. If `ai_mode_enabled == true`:
-3. The system gathers all current responses
-4. The responses become the **context**
-5. AI suggestions are generated for all canvases that:
+- help the facilitator fill empty canvas fields using already filled fields as context
 
-- do not yet have responses
+Trigger:
 
----
+- manual action from the phase 1 button
 
-## AI Suggestions
+Current frontend behavior:
 
-Suggestions are stored in the database.
+- the frontend finds empty fields
+- it sends one request per empty field in parallel
+- each suggestion appears under its canvas as soon as that specific request finishes
 
-Properties:
+Current endpoints:
 
-- `id`
-- `run_id`
-- `question_id`
+- `POST /projects/{run_id}/canvas/{question_key}/recommendation`
+- `POST /projects/{run_id}/canvas/recommendations` exists and remains compatible for batch generation
+
+Persistence:
+
+- stored in `ai_suggestions`
+
+Stored attributes:
+
 - `status`
 - `context_hash`
 - `output`
 - `error_message`
-- `created_at`
-- `updated_at`
+- timestamps
 
-Constraint: UNIQUE (run_id, question_id)
+Key behavior:
 
-`context_hash` ensures suggestions are not recomputed if the context has not changed.
+- recommendations are available only in phase 1
+- recommendations are generated only for empty fields
+- `context_hash` prevents unnecessary recomputation for the same context
+- stale queued/running suggestions can be marked as `stale`
 
----
+### 2. Phase 3 Canvas Overview
 
-# Phase Logic
+Purpose:
 
-The framework progresses through phases.
+- help the facilitator analyze each completed phase 3 canvas critically
 
-Example phases:
+Trigger:
 
-1 — Initial canvas completion  
-2 — Alignment / discussion  
-3 — Collaborative canvas refinement  
-4 — Participant scoring  
-5 — Results and averages / Deicison Go/Pivot/Abort
+- manual action from the phase 3 button
 
-The current phase is stored in the **Run** object. run.current_phase
+Current frontend behavior:
 
----
+- the canvas must be fully filled
+- the frontend sends one request per field in parallel
+- each overview appears progressively below its field
 
-# Phase 1 – Canvas + AI Assistance
+Current endpoints:
 
-Researcher fill canvases.
+- `POST /projects/{run_id}/canvas/{question_key}/overview`
+- `POST /projects/{run_id}/canvas/overview` for batch generation
 
-AI suggestions are generated automatically using existing responses.
+Persistence:
 
-Suggestions help fill missing canvases.
+- phase 3 overviews are not stored in the database
+- they are transient UI state
 
----
+### 3. LLM Client Abstraction
 
-# Phase 2 - Canvas alignment
+The backend talks to LLMs through `LLMClient.generate(prompt) -> str`.
 
-Researcher invites participantes by generating invite links.
-Participants discuss and align on canvas responses.
-Participantes cannot edit the canvases.
+Current implementations:
 
-# Phase 3 – Collaborative Canvas
+- `MockLLMClient`: deterministic fallback based on a prompt hash
+- `OpenAILLMClient`: uses the OpenAI Responses API
 
-Phase 3 reuses the **same canvas system as Phase 1**, but includes invited collaborators.
+Selection rule:
 
-Differences from Phase 1:
+- if `LLM_API_KEY` is configured, OpenAI is used
+- otherwise the system falls back to mock mode
 
-- participants include invited guests
-- multiple people may contribute to the discussion
+This keeps the service layer provider-agnostic.
 
-Database structure remains the same.
+## Phase Logic
 
----
+### Phase 1
 
-# Phase 4 – Score Submission
+- facilitator fills the initial board
+- AI recommendations can be requested for empty fields
+- suggestions are shown inline and can be accepted or dismissed in the UI
 
-Participants submit numeric scores evaluating aspects of the project.
-These scores must be persisted in the database.
-Participants can also give comments on each aspect, that will be displayed in Phase 5.
+### Phase 2
 
----
+- facilitator manages invite links
+- board content remains visible
+- advancing to phase 3 requires at least one invite in cycle 1
 
-## Scores
+### Phase 3
 
-Properties:
+- board is reviewed and reformulated
+- facilitator remains the only direct editor
+- AI overview can be requested only when every field is filled
 
-- `id`
+### Phase 4
+
+- invited participants submit semantic differential scores from 1 to 7
+- the facilitator can monitor completion
+- participants can optionally add comments per metric
+
+Current required metrics for completion:
+
+- `impact`
+- `alignment`
+- `feasibility`
+
+Note:
+
+- the domain module still defines `novelty` for compatibility, but the current UI and completion flow use the three metrics above
+
+### Phase 5
+
+- aggregated medians are displayed
+- comments are grouped by participant
+- facilitator records `GO`, `PIVOT`, or `ABORT`
+- a final PDF export is available only after `GO` or `ABORT`
+
+Pivot behavior:
+
+- records a `PIVOT` decision for the current cycle
+- resets `problem_synthesis`
+- moves the run back to phase 2
+- increments `current_cycle`
+- keeps the run active
+
+## Score and Result Model
+
+Scores are stored in `scores` with:
+
 - `run_id`
 - `participant_id`
 - `metric_key`
+- `cycle`
 - `value`
-- `created_at`
+- `comment`
 
-Constraint: UNIQUE (run_id, participant_id, metric_key)
+Constraint:
 
-Example metrics:
-feasibility
-impact
-novelty
-alignment
+- unique `(run_id, participant_id, metric_key, cycle)`
 
----
+Aggregations are computed dynamically in the service layer:
 
-# Phase 5 – Score Aggregation
+- average
+- median
+- per-value distribution
+- completion counters
 
-Phase 5 displays aggregated results.
+## PDF Export
 
-The system computes median across all submitted scores.
+The PDF export uses:
 
-These median are displayed in the UI.
+- phase 3 formulated problem content
+- phase 4 assessment medians
+- phase 5 decision
+- facilitator-authored `problem_synthesis`
 
-Aggregations may be computed:
+The export is generated by the backend and stored as an `exports` record with a downloadable file path.
 
-- dynamically in queries
-- or cached in a results table if necessary.
+## Backend Layers
 
----
+### Routers
 
-The researcher can choose to 'Go', 'Pivot' or 'Abort'.
+HTTP boundary and access control.
 
-- If he chooses 'Pivot', the global state of phase goes back to phase 2. Both researcher and participants go back to phase 2. The porpuse of the 'Pivot' decision is to reformulate the problem, therefore the project is not over and will restart from phase 2. The researcher can no longer invite more participants. The phase 2 canvases contain the answers submitted before. The will, then, formulated the problem again in phase 3 and in phase 4 the participants will again evaluate. On phase 5 the reseracher will make another decision.
+Main router modules:
 
-# Backend Structure
+- `auth.py`
+- `runs.py`
+- `canvas.py`
+- `invites.py`
+- `scores.py`
 
-Backend layers:
-app/
-routers/
-runs.py
-canvas.py
-invites.py
-scores.py
+### Services
 
-services/
-run_service.py
-canvas_service.py
-ai_service.py
-score_service.py
+Business rules and orchestration.
 
-repositories/
-run_repository.py
-canvas_repository.py
-invite_repository.py
-score_repository.py
+Current service modules:
 
-models/
-run.py
-participant.py
-invite.py
-canvas_question.py
-canvas_response.py
-ai_suggestion.py
-score.py
+- `run_service.py`
+- `canvas_service.py`
+- `ai_service.py`
+- `invite_service.py`
+- `score_service.py`
+- `pdf_service.py`
 
----
+### Repositories
 
-# AI Integration
+Persistence-oriented operations, isolated from business rules.
 
-AI generation is handled through an abstraction layer.
-LLMClient.generate(prompt) -> str
+Current repository modules:
 
-The implementation may use:
+- `run_repository.py`
+- `canvas_repository.py`
+- `ai_suggestion_repository.py`
+- `invite_repository.py`
+- `participant_repository.py`
+- `score_repository.py`
 
-- Gemini
-- OpenAI
-- other providers
+### Models
 
-The rest of the system must remain provider-agnostic.
+SQLAlchemy ORM models for the domain:
 
----
+- `Run`
+- `Participant`
+- `Invite`
+- `CanvasQuestion`
+- `CanvasResponse`
+- `AISuggestion`
+- `Score`
+- `Decision`
+- `Export`
+- `User`
 
-# Background Jobs
+## Frontend Data Flow
 
-AI suggestions are processed asynchronously.
+The frontend page for the run phases is centralized in `ProjectPhasePage.jsx`.
 
-Initial implementation:
+Current behavior:
 
-- FastAPI BackgroundTasks
+- polls run state every few seconds
+- polls assessment completion in phase 4
+- autosaves facilitator canvas edits in phases 1 to 3
+- renders AI output inline under each field
+- uses progressive multi-request flows for:
+  - phase 1 recommendations
+  - phase 3 overviews
 
-Future production option:
+## API Notes
 
-- Redis Queue (RQ)
-- Celery
+The project exposes both `/runs/...` and `/projects/...` aliases for most main endpoints.
 
----
+Examples:
 
-# Frontend Data Flow
+- `GET /projects/{id}`
+- `GET /projects/{id}/canvas`
+- `POST /projects/{id}/advance-phase`
+- `POST /projects/{id}/canvas/{field}/recommendation`
+- `POST /projects/{id}/canvas/{field}/overview`
+- `POST /projects/{id}/scores`
+- `POST /projects/{id}/decision`
+- `POST /projects/{id}/export/pdf`
 
-The frontend retrieves updates via polling.
+## Deployment Notes
 
-Endpoints:
-GET /runs/{id}
-GET /runs/{id}/canvas
-GET /runs/{id}/scores
+### Local
 
-Polling interval:
+Use Docker Compose:
 
-2–5 seconds.
+```bash
+docker compose up --build
+```
 
-This allows participants to see updates from other collaborators.
+### AI Configuration
 
----
+Relevant environment variables:
 
-# Key Design Principles
-
-1. **Run is the source of truth**
-2. **Phases are global**
-3. **Canvases are identified by keys**
-4. **AI suggestions on Phase 1 are obtained when the researcher clicks the 'Get Ai suggestion' button**
-5. **Responses are persisted**
-6. **Scores are persisted**
-7. **Backend logic lives in services**
-8. **Database constraints enforce consistency**
-
----
-
-# Deploy
-
-The same codebase supports two deployment modes:
-
-## 1) Web deployment (test/production)
-
-- Frontend deployed as a static web app (for example Vercel or Netlify)
-- Backend API deployed as a FastAPI service (for example Render, Railway, Fly.io, or similar)
-- Worker deployed as a separate service (same backend image, worker command)
-- PostgreSQL deployed as a managed database service
-- AI runs with provider credentials configured in environment variables
-
-Recommended backend/worker environment variables:
-
-- `AI_MODE=on`
 - `LLM_PROVIDER`
 - `LLM_API_KEY`
 - `LLM_MODEL`
@@ -406,22 +424,13 @@ Recommended backend/worker environment variables:
 - `DATABASE_URL`
 - `JWT_SECRET`
 
-In this mode, the deployed frontend calls the deployed backend API, and the backend/worker call the configured LLM provider API.
+## Key Design Decisions
 
-## 2) Open-source local deployment (Docker)
-
-- Repository remains open source for anyone to clone
-- Local execution remains available with Docker Compose
-- Current `docker-compose.yml` runs all required services:
-  - `db`
-  - `backend`
-  - `worker`
-  - `frontend`
-
-Local usage:
-
-1. Clone repository
-2. Copy `.env.example` to `.env`
-3. Run `docker compose up --build`
-
-This provides a reproducible local stack while preserving a separate web-deployed version.
+1. The run is the source of truth for phase and cycle.
+2. Canvas questions are phase-independent and reused.
+3. Canvas responses and scores are cycle-scoped.
+4. AI recommendations are persisted; phase 3 overviews are transient.
+5. The facilitator is the single writer for canvas content.
+6. Participants contribute mainly through invites and phase 4 scoring.
+7. The LLM provider is abstracted behind a simple synchronous client interface.
+8. The worker process is reserved for future asynchronous extensions, but the active AI flows are currently API-driven.

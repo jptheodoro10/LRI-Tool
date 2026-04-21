@@ -1,6 +1,5 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useAI } from "../context/AIContext";
 import logoPUC from "../img/logoPUC.png";
 
 export default function AppShell({
@@ -10,7 +9,6 @@ export default function AppShell({
   participantMode = false,
 }) {
   const location = useLocation();
-  const { aiEnabled, toggleAI } = useAI();
   const participantView = participantMode || location.search.includes("mode=participant");
 
   return (
@@ -30,12 +28,6 @@ export default function AppShell({
           <div className="topbar-right">
             {!participantView && (
               <>
-                <button
-                  className={`btn ${aiEnabled ? "btn-ai-on" : "btn-ai-off"}`}
-                  onClick={toggleAI}
-                >
-                  AI {aiEnabled ? "ON" : "OFF"}
-                </button>
                 {user && <span className="user-email">{user.email}</span>}
                 {user && (
                   <button className="btn btn-ghost" onClick={onLogout}>

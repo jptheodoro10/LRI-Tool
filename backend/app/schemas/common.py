@@ -21,11 +21,13 @@ class RunCreate(BaseModel):
 class RunPatch(BaseModel):
     ai_mode_enabled: bool | None = None
     title: str | None = None
+    problem_synthesis: str | None = None
 
 
 class RunOut(BaseModel):
     id: int
     title: str
+    problem_synthesis: str | None = None
     current_phase: int
     ai_mode_enabled: bool
     status: str
@@ -97,6 +99,30 @@ class InviteAcceptResponse(BaseModel):
 class CanvasWriteRequest(BaseModel):
     participant_id: int
     content: str
+
+
+class CanvasRecommendationsResponse(BaseModel):
+    generated_count: int
+    filled_count: int
+    empty_count: int
+    suggestions: dict[str, dict[str, str | None]]
+
+
+class CanvasSingleRecommendationResponse(BaseModel):
+    question_key: str
+    suggested_text: str
+    status: str
+
+
+class Phase3OverviewResponse(BaseModel):
+    generated_count: int
+    field_count: int
+    overviews: dict[str, str]
+
+
+class Phase3SingleOverviewResponse(BaseModel):
+    question_key: str
+    overview_text: str
 
 
 class ScoreSubmitRequest(BaseModel):

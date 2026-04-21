@@ -100,6 +100,17 @@ a {
   margin-bottom: 12px;
 }
 
+.board-section-header {
+  align-items: center;
+}
+
+.board-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
 h1,
 h2,
 h3,
@@ -188,17 +199,6 @@ h3 {
 
 .btn-danger:hover {
   background: #a81f1f;
-}
-
-.btn-ai-on {
-  background: #153fbe;
-  color: #fff;
-}
-
-.btn-ai-off {
-  background: transparent;
-  color: #4a5f98;
-  border-color: var(--outline);
 }
 
 .btn-sm {
@@ -566,6 +566,19 @@ textarea {
 }
 
 @media (max-width: 780px) {
+  .board-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .board-actions {
+    width: 100%;
+  }
+
+  .board-actions .btn {
+    width: 100%;
+  }
+
   .invite-create-row {
     grid-template-columns: 1fr;
   }
@@ -600,6 +613,7 @@ textarea {
 
 .suggestion-inline p {
   margin-bottom: 8px;
+  white-space: pre-line;
   color: var(--success-text);
   font-weight: 600;
 }

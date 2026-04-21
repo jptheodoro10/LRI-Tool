@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from fpdf import FPDF
 
@@ -32,11 +33,21 @@ def _write_wrapped_text(pdf: FPDF, text: str, line_height: float = 6) -> None:
 def build_pdf(output_path: str, title: str, phase_data: dict, summary_text: str, decision_text: str) -> str:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    generated_on = datetime.now().strftime('%B %d, %Y')
 
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.set_compression(False)
     pdf.add_page()
+    pdf.set_font('Helvetica', '', 10)
+    pdf.cell(
+        0,
+        6,
+        _latin1_safe(f'Workshop date: {generated_on}'),
+        align='R',
+        new_x='LMARGIN',
+        new_y='NEXT',
+    )
     pdf.set_font('Helvetica', 'B', 16)
     _write_wrapped_text(pdf, f'LRI Report - {title}', line_height=10)
 
