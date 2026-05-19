@@ -1370,8 +1370,8 @@ export default function ProjectPhasePage({ token, me }) {
                         }
                       >
                         {isGeneratingRecommendations
-                          ? "Gerando..."
-                          : "Obter recomendacao"}
+                          ? "Generating..."
+                          : "Get recommendation"}
                       </button>
                     )}
                     {showPhase3OverviewButton && (
