@@ -638,6 +638,12 @@ textarea {
   gap: 10px;
 }
 
+.assessment-grid .field-card > label {
+  display: block;
+  line-height: 1.45;
+  margin-bottom: 4px;
+}
+
 .comments-grid {
   display: grid;
   gap: 10px;
@@ -682,7 +688,7 @@ textarea {
 }
 
 .semantic-scale-row {
-  margin-top: 10px;
+  margin-top: 16px;
   display: grid;
   grid-template-columns: minmax(100px, 1fr) auto minmax(100px, 1fr);
   align-items: center;

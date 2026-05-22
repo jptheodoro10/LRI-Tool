@@ -19,13 +19,13 @@ const phase1PlaceholdersInOrder = [
 ];
 
 const phase1FieldOrder = [
-  'Describe the pain point',
-  'Characterize the environment',
-  'Consequences/Benefits',
-  'Identify People Involved',
-  'What scientific evidence?',
-  'Define the objectives',
-  'What research questions?',
+  'For the practical problem (what/how/why)',
+  'Involved in the context (where/when)',
+  'Which bring the following implications/impacts (why) ',
+  'For the stakeholders (who)',
+  'We have the following evidence (how)',
+  'And we want to investigate (what/how)',
+  'Answering the following research question (what)',
 ];
 
 const fieldPlaceholderMap = Object.fromEntries(
