@@ -9,7 +9,8 @@ export default function AppShell({
   participantMode = false,
 }) {
   const location = useLocation();
-  const participantView = participantMode || location.search.includes("mode=participant");
+  const participantView =
+    participantMode || location.search.includes("mode=participant");
 
   return (
     <div className="app-root">
@@ -21,7 +22,7 @@ export default function AppShell({
             <div>
               {}
               <Link className="brand" to="/dashboard">
-                LRI Tool
+                LRI Co-Assistant
               </Link>
             </div>
           )}

@@ -38,10 +38,10 @@ PHASE3_CANVAS_ORDER = [
 ]
 PHASE3_CANVAS_TITLES = {
     'problem': 'For the practical problem (what/how/why)',
-    'stakeholders': 'In the context (where/when)',
-    'research_questions': 'with the following implications / impacts (why)',
+    'stakeholders': 'Involved in the context (where/when)',
+    'research_questions': 'Which bring the following implications / impacts (why)',
     'hypotheses': 'For the stakeholders (who)',
-    'method': 'we have the following evidence (how)',
+    'method': 'We have the following evidence (how)',
     'evaluation': 'And we want to investigate - objective (what/how)',
     'risks': 'Answering the following research questions (what)',
 }

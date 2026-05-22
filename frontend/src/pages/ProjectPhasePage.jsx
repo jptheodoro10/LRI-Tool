@@ -80,6 +80,15 @@ const semanticAnchors = {
   feasible: { left: "Not Feasible", right: "Feasible" },
 };
 
+const assessmentCriterionDescriptions = {
+  valuable:
+    "Valuable: To what extent does addressing the formulated problem have the potential to generate meaningful value for industrial practice?",
+  applicable:
+    "Applicable: To what extent can the expected results of this formulated research problem be realistically applied in real industry scenarios (considering factors such as adoption potential, contextual fit, and stakeholder willingness to use the outcomes)?",
+  feasible:
+    "Feasible: To what extent can this research problem be realistically investigated with the resources typically available?",
+};
+
 const phase5Decisions = ["GO", "PIVOT", "ABORT"];
 const decisionAriaLabels = {
   GO: "Proceed with the research problem",
@@ -90,10 +99,10 @@ const canvasAutoSavePollingMs = 5000;
 
 const phase3CanvasTitles = {
   problem: "For the practical problem (what/how/why)",
-  stakeholders: "In the context (where/when)",
-  research_questions: "with the following implications / impacts (why)",
+  stakeholders: "Involved in the context (where/when)",
+  research_questions: "Which bring the following implications/impacts (why) ",
   hypotheses: "For the stakeholders (who)",
-  method: "we have the following evidence (how)",
+  method: "We have the following evidence (how)",
   evaluation: "And we want to investigate - objective (what/how)",
   risks: "Answering the following research questions (what)",
 };
@@ -268,7 +277,12 @@ export default function ProjectPhasePage({ token, me }) {
 
   async function fetchInvites() {
     if (isParticipant) return [];
-    const data = await api(`/projects/${projectId}/invites`, "GET", null, token);
+    const data = await api(
+      `/projects/${projectId}/invites`,
+      "GET",
+      null,
+      token
+    );
     if (!Array.isArray(data)) return [];
     return data.map((item) => ({
       id: item.id,
@@ -680,7 +694,9 @@ export default function ProjectPhasePage({ token, me }) {
       const failures = [];
       const tasks = emptyFields.map((field) =>
         api(
-          `/projects/${projectId}/canvas/${encodeURIComponent(field)}/recommendation`,
+          `/projects/${projectId}/canvas/${encodeURIComponent(
+            field
+          )}/recommendation`,
           "POST",
           {},
           token
@@ -811,7 +827,9 @@ export default function ProjectPhasePage({ token, me }) {
         );
       } else if (generatedCount > 0) {
         setActionMessage(
-          `${generatedCount} overview${generatedCount === 1 ? "" : "s"} ready. ${failures.length} failed.`
+          `${generatedCount} overview${
+            generatedCount === 1 ? "" : "s"
+          } ready. ${failures.length} failed.`
         );
       } else {
         setTimedActionMessage("No overviews were generated.", 2500);
@@ -948,7 +966,9 @@ export default function ProjectPhasePage({ token, me }) {
     if (isParticipant || routePhase !== 2) return;
     const normalizedName = String(inviteeName || "").trim();
     if (!normalizedName) {
-      setActionMessage("Enter the participant name before generating the link.");
+      setActionMessage(
+        "Enter the participant name before generating the link."
+      );
       return;
     }
     if (Number(project?.current_cycle || 1) > 1) {
@@ -1057,7 +1077,9 @@ export default function ProjectPhasePage({ token, me }) {
         pending_invites: Number(scoresData.pending_invites || 0),
       });
       setResultsInfo(criteria || null);
-      setCommentsInfo(Array.isArray(scoresData.comments) ? scoresData.comments : []);
+      setCommentsInfo(
+        Array.isArray(scoresData.comments) ? scoresData.comments : []
+      );
     } catch (err) {
       setCompletionInfo({
         all_done: false,
@@ -1354,7 +1376,9 @@ export default function ProjectPhasePage({ token, me }) {
             <>
               <div className="section-header board-section-header">
                 <h2>
-                  {isParticipant ? "Workshop Contribution" : "Board Content"}
+                  {isParticipant
+                    ? "Workshop Contribution"
+                    : "Problem Vision board"}
                 </h2>
                 {(showRecommendationButton || showPhase3OverviewButton) && (
                   <div className="board-actions">
@@ -1494,12 +1518,12 @@ export default function ProjectPhasePage({ token, me }) {
 
           {routePhase === 4 && (
             <>
-              <h2>Semantic Differential Assessment</h2>
+              <h2>Semantic Differential Scale</h2>
               {isParticipant ? (
                 <div className="assessment-grid">
                   {["valuable", "applicable", "feasible"].map((criterion) => (
                     <div className="field-card" key={criterion}>
-                      <label>{criterion}</label>
+                      <label>{assessmentCriterionDescriptions[criterion]}</label>
                       <div className="semantic-scale-row">
                         <span className="semantic-anchor">
                           {semanticAnchors[criterion].left}
@@ -1586,7 +1610,8 @@ export default function ProjectPhasePage({ token, me }) {
               ) : (
                 <div>
                   <p className="muted">
-                    Advance is enabled only when all respondents complete their assessments.
+                    Advance is enabled only when all respondents complete their
+                    assessments.
                   </p>
                   <p className="hint">
                     Status:{" "}
