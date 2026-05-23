@@ -6,7 +6,7 @@ const PHASES = [1, 2, 3, 4, 5];
 export default function PhaseStepper({ currentPhaseNumber, activePhaseNumber }) {
   return (
     <aside className="phase-sidebar card">
-      <h3>Research Phases</h3>
+      <h3>LRI Phases</h3>
       <ul className="phase-list">
         {PHASES.map((phase) => {
           const isCurrent = phase === currentPhaseNumber;
