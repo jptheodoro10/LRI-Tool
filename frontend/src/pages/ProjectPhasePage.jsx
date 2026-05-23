@@ -1367,7 +1367,7 @@ export default function ProjectPhasePage({ token, me }) {
               <h1>{phaseTitle}</h1>
               <p className="muted">Project: {project.title}</p>
             </div>
-            <div className="phase-chip">F{routePhase}</div>
+            <div className="phase-chip">Phase {routePhase}</div>
           </div>
         </div>
 

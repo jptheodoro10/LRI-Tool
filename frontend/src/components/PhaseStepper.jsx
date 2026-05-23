@@ -1,12 +1,15 @@
-import React from 'react';
+import React from "react";
 import { Check, Lock } from "lucide-react";
 
 const PHASES = [1, 2, 3, 4, 5];
 
-export default function PhaseStepper({ currentPhaseNumber, activePhaseNumber }) {
+export default function PhaseStepper({
+  currentPhaseNumber,
+  activePhaseNumber,
+}) {
   return (
     <aside className="phase-sidebar card">
-      <h3>Research Phases</h3>
+      <h3>LRI Phases</h3>
       <ul className="phase-list">
         {PHASES.map((phase) => {
           const isCurrent = phase === currentPhaseNumber;
@@ -17,13 +20,23 @@ export default function PhaseStepper({ currentPhaseNumber, activePhaseNumber }) 
           return (
             <li
               key={phase}
-              className={`phase-item ${isCurrent ? 'current' : ''} ${isActive ? 'active' : ''} ${isLocked ? 'locked' : ''}`}
+              className={`phase-item ${isCurrent ? "current" : ""} ${
+                isActive ? "active" : ""
+              } ${isLocked ? "locked" : ""}`}
             >
               <span>Phase {phase}</span>
               {isCompleted ? (
-                <Check className="phase-icon phase-icon-check" size={14} aria-hidden="true" />
+                <Check
+                  className="phase-icon phase-icon-check"
+                  size={14}
+                  aria-hidden="true"
+                />
               ) : isLocked ? (
-                <Lock className="phase-icon phase-icon-lock" size={14} aria-hidden="true" />
+                <Lock
+                  className="phase-icon phase-icon-lock"
+                  size={14}
+                  aria-hidden="true"
+                />
               ) : (
                 <span className="phase-icon-placeholder" aria-hidden="true" />
               )}
