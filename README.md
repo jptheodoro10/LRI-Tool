@@ -64,4 +64,4 @@ Run backend tests inside container:
 
 ## Badge Notes
 - Functional: fully reproducible local run via Docker Compose.
-- Available: create a persistent DOI snapshot (Zenodo/Figshare/OSF) for submission.
+- Available: Repository in Zenodo for submission.
