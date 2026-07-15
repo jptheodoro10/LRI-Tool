@@ -3,7 +3,7 @@
 Self-contained artifact for Lean Research Inception (LRI), focused on reproducible local execution.
 
 ## Paper Link
-Add accepted paper URL here: `TBD`
+https://zenodo.org/records/20355609
 
 ## Repository Structure
 - `backend/`: FastAPI, SQLAlchemy, Alembic, worker logic, tests
