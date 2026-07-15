@@ -9,7 +9,6 @@ https://zenodo.org/records/20355609
 - `backend/`: FastAPI, SQLAlchemy, Alembic, worker logic, tests
 - `frontend/`: React app with inline AI suggestions in fields (green)
 - `scripts/`: startup and smoke test scripts
-- `fixtures/`: deterministic AI fixtures (expandable)
 - `docs/`: supporting documentation
 - `docker-compose.yml`: local orchestration (`db`, `backend`, `worker`, `frontend`)
 
