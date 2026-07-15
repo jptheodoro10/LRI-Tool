@@ -20,8 +20,8 @@ Add accepted paper URL here: `TBD`
 - ~2 GB free disk
 
 ## Installation
-1. Copy env:
-   - `cp .env.example .env`
+1. Set OPENAI_API_KEY:
+   - Set OPENAI_API_KEY on the env file
 2. Start stack:
    - `docker compose up --build`
 3. Open frontend:
@@ -33,9 +33,6 @@ Add accepted paper URL here: `TBD`
 - Email: `researcher@example.com`
 - Password: `researcher123`
 
-## AI Modes
-- `AI_MODE=mock` (default): deterministic, offline-friendly
-- `AI_MODE=on`: optional external LLM mode; if unavailable, backend falls back to mock
 
 ## Basic Usage Example
 1. Login as researcher.
